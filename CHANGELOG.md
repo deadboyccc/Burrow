@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- busybox 1.38.0 (pinned by digest) for the one-shot `decoy-init` helper (Dependabot #1).
+
 ## [1.1.0] - 2026-11-18
 
 A one-command installer, plus a hardening pass from a full security audit of the

@@ -50,7 +50,7 @@ setup() {
 @test "secret_redact never shows the key" {
 	secret=ee00112233445566778899aabbccddeeff6162632e6f7267 # gitleaks:allow (test fixture, not a real secret)
 	run secret_redact "$secret"
-	assert_output "ee0011…6f7267"
+	assert_output "ee0011…7267"
 	refute_output --partial 445566778899
 }
 

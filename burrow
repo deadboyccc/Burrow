@@ -340,7 +340,7 @@ cmd_status() {
 	if tools_in_stack probe --host mtg --port 3128 --timeout 5 >/dev/null; then
 		ok "FakeTLS handshake succeeds"
 	else
-		fail "FakeTLS handshake fails (see ./burrow logs mtg)"
+		cross "FakeTLS handshake fails (see ./burrow logs mtg)"
 		healthy=0
 	fi
 	info "traffic since start"
@@ -522,11 +522,11 @@ cmd_doctor() {
 		local cv
 		cv=$(docker compose version --short 2>/dev/null || echo 0)
 		if version_ge "${cv%%[-+]*}" "$MIN_COMPOSE_VERSION"; then ok "Docker Compose $cv"; else
-			fail "Docker Compose ${cv} (need >= $MIN_COMPOSE_VERSION)"
+			cross "Docker Compose ${cv} (need >= $MIN_COMPOSE_VERSION)"
 			problems=$((problems + 1))
 		fi
 	else
-		fail "Docker is not installed or not reachable"
+		cross "Docker is not installed or not reachable"
 		problems=$((problems + 1))
 	fi
 	if command -v timedatectl >/dev/null 2>&1; then
@@ -542,7 +542,7 @@ cmd_doctor() {
 
 	info "configuration"
 	if [[ ! -f $ENV_FILE ]]; then
-		fail "no $ENV_FILE yet (./burrow init)"
+		cross "no $ENV_FILE yet (./burrow init)"
 		return 1
 	fi
 	config_load "$ENV_FILE"
@@ -563,10 +563,10 @@ cmd_doctor() {
 			local resolved
 			resolved=$(getent ahostsv4 "$DOMAIN" 2>/dev/null | awk '{print $1; exit}' || true)
 			if [[ -z $resolved ]]; then
-				fail "$DOMAIN does not resolve. Add an A record pointing to ${PUBLIC_IPV4:-this server}"
+				cross "$DOMAIN does not resolve. Add an A record pointing to ${PUBLIC_IPV4:-this server}"
 				problems=$((problems + 1))
 			elif [[ -n $PUBLIC_IPV4 && $resolved != "$PUBLIC_IPV4" ]]; then
-				fail "$DOMAIN resolves to $resolved, but this server is $PUBLIC_IPV4 (SNI and DNS must match)"
+				cross "$DOMAIN resolves to $resolved, but this server is $PUBLIC_IPV4 (SNI and DNS must match)"
 				problems=$((problems + 1))
 			else
 				ok "$DOMAIN resolves to $resolved"
@@ -594,7 +594,7 @@ cmd_doctor() {
 	fi
 
 	if ((problems)); then
-		fail "$problems problem(s) found"
+		cross "$problems problem(s) found"
 		return 1
 	fi
 	ok "all good"
@@ -645,7 +645,7 @@ _smoke_check() { # _smoke_check DESCRIPTION -- runner args...
 		ok "$description"
 		SMOKE_PASSED=$((SMOKE_PASSED + 1))
 	else
-		fail "$description"
+		cross "$description"
 		say "      ${C_DIM}${output//$'\n'/$'\n      '}${C_RESET}"
 		SMOKE_FAILED=$((SMOKE_FAILED + 1))
 	fi
@@ -715,7 +715,7 @@ cmd_smoke() {
 	unset PROBE_SECRET
 
 	if ((SMOKE_FAILED)); then
-		fail "$SMOKE_FAILED of $((SMOKE_PASSED + SMOKE_FAILED)) checks failed"
+		cross "$SMOKE_FAILED of $((SMOKE_PASSED + SMOKE_FAILED)) checks failed"
 		return 1
 	fi
 	ok "all $SMOKE_PASSED checks passed"

@@ -6,6 +6,36 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.5] - 2026-11-18
+
+### Fixed
+
+- **The proxy now actually uses the TCP tuning.** Every client connection, and every
+  connection to Telegram, ends inside the mtg container's own network namespace. That
+  namespace doesn't inherit most of the host's settings, so the relay was running on
+  kernel defaults: slow start after idle, no MTU probing, a 128-entry SYN queue and
+  two-hour keepalives. The container now sets these itself:
+  - no slow start after idle, so media sent after a pause doesn't start slowly;
+  - MTU probing, which avoids stalls on mobile networks;
+  - 8,192-entry accept and SYN queues;
+  - faster cleanup of dead connections;
+  - a 128 KiB cap on unsent data per socket.
+
+  A new test keeps the container and host profiles in step.
+- **`fq` now takes effect at install time.** `net.core.default_qdisc` only applies to
+  interfaces brought up after it's set, so the network card stayed on `fq_codel` until a
+  reboot. The installer now switches the uplink to `fq` immediately: one `fq` for a
+  single-queue card, or one per queue under `mq`.
+- **About 80 unit tests could not fail.** burrow's own `fail` status helper shadowed the
+  test framework's `fail`, so every assertion in tests that load burrow's libraries
+  passed even when it was wrong. The helper is renamed to `cross`. Turning the assertions
+  back on found one stale expectation and no product bugs.
+
+### Changed
+
+- The host profile also caps unsent data per socket (`tcp_notsent_lowat`, 128 KiB): less
+  memory per connection and less queueing delay, with no loss of throughput under BBR.
+
 ## [1.1.4] - 2026-11-18
 
 ### Changed
@@ -235,7 +265,8 @@ First release. Digby the mole digs his first tunnel.
   release workflow with checksums, and a GitHub Pages site starring Digby.
 - Documentation: an in-depth README and an A-Z deployment guide (`docs/DEPLOY.md`).
 
-[Unreleased]: https://github.com/deadboyccc/Burrow/compare/v1.1.4...HEAD
+[Unreleased]: https://github.com/deadboyccc/Burrow/compare/v1.1.5...HEAD
+[1.1.5]: https://github.com/deadboyccc/Burrow/compare/v1.1.4...v1.1.5
 [1.1.4]: https://github.com/deadboyccc/Burrow/compare/v1.1.3...v1.1.4
 [1.1.3]: https://github.com/deadboyccc/Burrow/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/deadboyccc/Burrow/compare/v1.1.1...v1.1.2

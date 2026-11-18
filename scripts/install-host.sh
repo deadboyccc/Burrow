@@ -193,6 +193,29 @@ setup_time() {
 }
 
 # --- Kernel tuning -----------------------------------------------------------
+# net.core.default_qdisc only applies to interfaces brought up after it is
+# set, so the uplink keeps its boot-time qdisc (usually fq_codel) until the
+# next reboot. Switch it to fq now: one fq for a single-queue NIC, or one fq
+# per hardware queue under mq. Idempotent, and never fatal.
+apply_fq() {
+	local dev queues i
+	command -v tc >/dev/null 2>&1 || return 0
+	dev=$(ip -o route show default 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit }}')
+	[[ -n $dev && -d /sys/class/net/$dev/queues ]] || return 0
+	queues=$(find "/sys/class/net/$dev/queues" -maxdepth 1 -name 'tx-*' | wc -l)
+	if ((queues <= 1)); then
+		run tc qdisc replace dev "$dev" root fq || note "could not set fq on $dev; it applies after a reboot"
+	else
+		run tc qdisc replace dev "$dev" root handle 1: mq || {
+			note "could not set fq on $dev; it applies after a reboot"
+			return 0
+		}
+		for ((i = 1; i <= queues; i++)); do
+			run tc qdisc replace dev "$dev" parent "1:$(printf '%x' "$i")" fq || true
+		done
+	fi
+}
+
 setup_sysctl() {
 	log "kernel network tuning (BBR, fq, larger queues)"
 	if ((DRY_RUN)) || modprobe tcp_bbr 2>/dev/null || grep -qw bbr /proc/sys/net/ipv4/tcp_available_congestion_control 2>/dev/null; then
@@ -202,6 +225,7 @@ setup_sysctl() {
 		# Some keys are read-only in containers (LXC/OpenVZ); that must not stop
 		# the firewall and the rest of the setup.
 		run sysctl --quiet --system || note "some kernel settings could not be applied (normal in containers); continuing"
+		apply_fq
 	else
 		note "this kernel has no BBR module; skipping (common inside OpenVZ/LXC containers)"
 	fi

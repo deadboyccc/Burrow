@@ -247,3 +247,17 @@ setup() {
 	run render_mtg_toml
 	assert_line "debug = true"
 }
+
+@test "compose: the proxy container gets the host's per-namespace TCP tuning" {
+	# These settings are per network namespace: the host profile never reaches
+	# the proxy's sockets unless compose.yaml repeats them for the mtg container.
+	local key host container drift=""
+	for key in net.core.somaxconn net.ipv4.tcp_max_syn_backlog net.ipv4.tcp_slow_start_after_idle \
+		net.ipv4.tcp_mtu_probing net.ipv4.tcp_notsent_lowat net.ipv4.tcp_fin_timeout \
+		net.ipv4.tcp_keepalive_time net.ipv4.tcp_keepalive_intvl net.ipv4.tcp_keepalive_probes; do
+		host=$(sed -n "s/^${key//./\\.} = //p" "$BURROW_ROOT/deploy/sysctl/99-burrow.conf")
+		container=$(sed -n "s/^ *${key//./\\.}: \"\(.*\)\"$/\1/p" "$BURROW_ROOT/compose.yaml")
+		[[ -n $host && $host == "$container" ]] || drift+="$key: host '$host', mtg container '$container'"$'\n'
+	done
+	assert_equal "$drift" ""
+}

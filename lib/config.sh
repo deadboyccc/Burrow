@@ -228,7 +228,7 @@ config_validate() {
 
 	if ((${#_config_errors[@]})); then
 		local e
-		for e in "${_config_errors[@]}"; do fail "$e"; done
+		for e in "${_config_errors[@]}"; do cross "$e"; done
 		return 1
 	fi
 }

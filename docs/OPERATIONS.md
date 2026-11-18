@@ -53,12 +53,16 @@ What that serves at the same time:
 | Everyone watching video (1–3 Mbit/s each) | about 30–45 |
 
 What makes it fast:
-- **Kernel:** BBR congestion control with `fq`, larger queues and buffers, and MTU probing.
-  These matter most on the lossy, long-distance links censored users tend to have.
+- **Kernel:** BBR congestion control with `fq`, larger queues and buffers, MTU probing,
+  no slow restart after idle, and a cap on unsent data per socket. These matter most on the
+  lossy, long-distance links censored users tend to have. The installer switches the network
+  card to `fq` at once, not only after the next reboot.
 - **Network path:** no userspace proxy. Ports are forwarded by the kernel, and client
   addresses are preserved.
-- **Per container:** a larger accept queue, a wide port range for connections to Telegram,
-  and 65,536 file descriptors.
+- **Inside the proxy container:** every connection ends in the container's own network
+  namespace, which doesn't inherit the host's TCP settings. So the container repeats the
+  TCP tuning itself, and adds a larger accept queue, a wide port range for connections to
+  Telegram, and 65,536 file descriptors.
 - **Tuning knobs:** `CONCURRENCY`, `MTG_MEMORY_LIMIT`, `IDLE_TIMEOUT`.
 
 Watch your provider's **monthly data allowance**: at full speed the server can move about

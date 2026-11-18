@@ -3,7 +3,7 @@
 # Shared helpers: output, errors, small portable utilities.
 # Sourced by ./burrow and the tests. Never executed directly.
 
-BURROW_VERSION="1.1.4"
+BURROW_VERSION="1.1.5"
 
 if [[ -t 2 && -z ${NO_COLOR:-} && ${TERM:-} != dumb ]]; then
 	C_RESET=$'\e[0m' C_BOLD=$'\e[1m' C_DIM=$'\e[2m'
@@ -18,7 +18,7 @@ say() { printf '%s\n' "$*" >&2; }
 info() { printf '%s==>%s %s\n' "${C_BLUE}${C_BOLD}" "$C_RESET" "$*" >&2; }
 ok() { printf '  %s✓%s %s\n' "$C_GREEN" "$C_RESET" "$*" >&2; }
 warn() { printf '  %s!%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
-fail() { printf '  %s✗%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; }
+cross() { printf '  %s✗%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; }
 die() {
 	printf '%serror:%s %s\n' "${C_RED}${C_BOLD}" "$C_RESET" "$1" >&2
 	exit "${2:-1}"

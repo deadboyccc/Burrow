@@ -32,6 +32,8 @@
 #   BURROW_REPO             git URL (default: the official repository)
 #   BURROW_INIT_ARGS        extra `burrow init` flags, e.g. "--subnet 10.77.1.0/28"
 #   BURROW_SKIP_HOST_SETUP  1: leave Docker/firewall/sysctl alone (you manage the host)
+#   BURROW_SWAP             0: never add a swap file (default: a 2 GiB one on servers
+#                           with 2 GiB of RAM or less and no swap)
 #   BURROW_DRY_RUN          1: print every step, change nothing
 #
 # The whole script is one function called on the last line, so a truncated
@@ -39,10 +41,16 @@
 
 set -Eeuo pipefail
 
-BURROW_INSTALLER_REF=v1.1.5 # the release this installer belongs to
+BURROW_INSTALLER_REF=v1.2.0 # the release this installer belongs to
 
 say() { printf '%s\n' "$*" >&2; }
-step() { printf '\n\033[1m==> %s\033[0m\n' "$*" >&2; }
+step() {
+	if [[ -t 2 && -z ${NO_COLOR:-} ]]; then
+		printf '\n\033[1m==> %s\033[0m\n' "$*" >&2
+	else
+		printf '\n==> %s\n' "$*" >&2
+	fi
+}
 die() {
 	printf 'error: %s\n' "$*" >&2
 	exit 1
@@ -81,9 +89,10 @@ main() {
 	local ssh_port=${BURROW_SSH_PORT:-} dir=${BURROW_DIR:-/opt/burrow}
 	local ref=${BURROW_REF:-$BURROW_INSTALLER_REF}
 	local repo=${BURROW_REPO:-https://github.com/deadboyccc/Burrow.git}
-	local skip_host
+	local skip_host swap
 	DRY=$(yes_no BURROW_DRY_RUN "${BURROW_DRY_RUN:-}")
 	skip_host=$(yes_no BURROW_SKIP_HOST_SETUP "${BURROW_SKIP_HOST_SETUP:-}")
+	swap=$(yes_no BURROW_SWAP "${BURROW_SWAP:-1}")
 	local extra_init=() arg
 	read -ra extra_init <<<"${BURROW_INIT_ARGS:-}"
 	for arg in "${extra_init[@]}"; do
@@ -119,8 +128,11 @@ main() {
 	step "prerequisites"
 	if ! command -v git >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
 		command -v apt-get >/dev/null 2>&1 || die "git and curl are required (this installer automates Debian/Ubuntu)"
-		run apt-get update -qq
-		run env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends git curl ca-certificates
+		# A fresh server may still be running its first automatic updates:
+		# wait for the package lock instead of failing on it.
+		run apt-get -o DPkg::Lock::Timeout=600 update -qq
+		run env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 install -y -qq \
+			--no-install-recommends git curl ca-certificates
 	else
 		say "    git and curl are present"
 	fi
@@ -205,6 +217,7 @@ main() {
 		step "preparing the host: Docker, firewall, kernel tuning, time sync, updates, watchdog"
 		local host_args=(--dir "$dir" --ports "$ports")
 		[[ -n $ssh_port ]] && host_args+=(--ssh-port "$ssh_port")
+		((swap)) || host_args+=(--no-swap)
 		if ((DRY && fetched)); then
 			"$src/scripts/install-host.sh" "${host_args[@]}" --dry-run
 		else

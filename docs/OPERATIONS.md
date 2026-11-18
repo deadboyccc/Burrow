@@ -63,6 +63,16 @@ What makes it fast:
   namespace, which doesn't inherit the host's TCP settings. So the container repeats the
   TCP tuning itself, and adds a larger accept queue, a wide port range for connections to
   Telegram, and 65,536 file descriptors.
+- **Memory:** mtg's Go runtime gets a memory limit of three quarters of its container
+  limit, so near the cap it collects garbage harder instead of being OOM-killed with
+  every connection. The rest is headroom for kernel socket buffers. On servers with
+  2 GiB of RAM or less and no swap, the installer adds a 2 GiB swap file (swappiness 10:
+  the proxy stays in RAM, and swap only absorbs real pressure).
+- **Connection tracking:** Docker's NAT tracks every connection, so the installer sizes
+  the hash table to the connection limit (65,536 buckets for 262,144 entries). The kernel
+  default on a 1 GB server is 8,192 buckets.
+- **Fast checks:** the probe tool ships precompiled and loads the QR library only for QR
+  codes, so `status`, `smoke` and each watchdog run start about 30% faster.
 - **Tuning knobs:** `CONCURRENCY`, `MTG_MEMORY_LIMIT`, `IDLE_TIMEOUT`.
 
 Watch your provider's **monthly data allowance**: at full speed the server can move about

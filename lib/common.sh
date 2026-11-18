@@ -3,7 +3,7 @@
 # Shared helpers: output, errors, small portable utilities.
 # Sourced by ./burrow and the tests. Never executed directly.
 
-BURROW_VERSION="1.1.5"
+BURROW_VERSION="1.2.0"
 
 if [[ -t 2 && -z ${NO_COLOR:-} && ${TERM:-} != dumb ]]; then
 	C_RESET=$'\e[0m' C_BOLD=$'\e[1m' C_DIM=$'\e[2m'

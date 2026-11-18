@@ -77,6 +77,36 @@ tools_host() { # tools_host SECRET ARGS...
 	assert_output --partial "probes sent to decoy"
 }
 
+@test "status and smoke leave the caller's stdin alone (ssh host 'bash -s' <script)" {
+	# status runs probes inside the stack, smoke --link on the host: both paths.
+	local link
+	link=$(burrow link --format tg)
+	run bash -c 'printf "next line\n" | {
+		"$1" status >/dev/null 2>&1
+		"$1" smoke --link "$2" --insecure --no-telegram >/dev/null 2>&1
+		cat
+	}' _ "$BURROW_ROOT/burrow" "$link"
+	assert_success
+	assert_output "next line"
+}
+
+@test "mtg runs with a Go memory limit below its container limit" {
+	run docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$(container mtg)"
+	assert_output --partial "GOMEMLIMIT=393216KiB"
+}
+
+@test "the proxy container has the TCP tuning (its network namespace doesn't inherit the host's)" {
+	# The mtg image has no shell tools: read /proc/sys/net from a throwaway
+	# container that joins mtg's network namespace.
+	local busybox
+	busybox=$(sed -n 's/^ *image: \(busybox:.*\)$/\1/p' "$BURROW_ROOT/compose.yaml")
+	run docker run --rm --network "container:$(container mtg)" "$busybox" cat \
+		/proc/sys/net/ipv4/tcp_slow_start_after_idle /proc/sys/net/ipv4/tcp_mtu_probing \
+		/proc/sys/net/ipv4/tcp_max_syn_backlog
+	assert_success
+	assert_output $'0\n1\n8192'
+}
+
 @test "running containers are hardened" {
 	for svc in mtg decoy; do
 		run docker inspect -f '{{.HostConfig.ReadonlyRootfs}} {{.HostConfig.CapDrop}} {{.HostConfig.SecurityOpt}} {{.Config.User}} {{.HostConfig.RestartPolicy.Name}}' "$(container "$svc")"

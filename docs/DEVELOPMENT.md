@@ -14,14 +14,14 @@ make lint              # shellcheck, shfmt, ruff, compose validation
 
 Set `BURROW_E2E_OFFLINE=1` to skip only the checks that need Telegram.
 
-## The test suites (263 tests)
+## The test suites (275 tests)
 
 | Suite | What it proves |
 |---|---|
-| **unit/** (bats, 114) | Validators reject injection; `.env` parsing never executes code; secrets, links, rendering and file permissions are right; `--help` and bad arguments never run commands; privacy defaults hold. |
-| **tools/tests/** (pytest, 92) | The FakeTLS/MTProto client against a line-by-line port of mtg's server checks; a full Telegram round trip through a fake relay; probe verdicts and time limits against hostile servers; QR output. |
-| **integration/** (29) | The real mtg binary accepts every config variant; Caddy validates every Caddyfile; the compose model is hardened; the host and install scripts plan the right steps in a Debian container. |
-| **e2e/** (28) | Full stacks with real Telegram round trips; hardening as actually run; decoy pages, 404s and redirects; rotation; crash and hang recovery; block and allow lists; simple mode; `try`; `deploy` end to end; the installer for real, including an upgrade that removes dropped files and keeps the secret. |
+| **unit/** (bats, 117) | Validators reject injection; `.env` parsing never executes code; secrets, links, rendering and file permissions are right; `--help` and bad arguments never run commands; privacy defaults hold. |
+| **tools/tests/** (pytest, 93) | The FakeTLS/MTProto client against a line-by-line port of mtg's server checks; a full Telegram round trip through a fake relay; probe verdicts and time limits against hostile servers; QR output. |
+| **integration/** (34) | The real mtg binary accepts every config variant; Caddy validates every Caddyfile; the compose model is hardened; the host and install scripts plan the right steps in a Debian container. |
+| **e2e/** (31) | Full stacks with real Telegram round trips; hardening as actually run; decoy pages, 404s and redirects; rotation; crash and hang recovery; block and allow lists; simple mode; `try`; `deploy` end to end; the installer for real, including an upgrade that removes dropped files and keeps the secret. |
 
 CI runs every suite and a gitleaks secret scan on each push and pull request, and again
 weekly to catch upstream changes (Telegram, images, certificate authorities).

@@ -817,6 +817,8 @@ Usage: burrow deploy USER@HOST --domain NAME [options]
   --ssh-port N         SSH port (default 22)
   -i, --identity FILE  SSH private key
   --no-host-setup      skip scripts/install-host.sh (Docker, firewall, sysctl, watchdog)
+  --no-swap            never add a swap file (default: 2 GiB on servers with 2 GiB
+                       of RAM or less and no swap)
   --no-local-smoke     skip the smoke test from this machine
 
 Idempotent: re-running upgrades the code and keeps the server's .env/secret.
@@ -835,13 +837,14 @@ project_files() {
 
 cmd_deploy() {
 	local target='' dir=/opt/burrow ssh_port=22 identity='' host_setup=1 local_smoke=1
-	local init_args=() proxy_port=443 http_port=80
+	local init_args=() proxy_port=443 http_port=80 host_flags=''
 	while (($#)); do
 		case $1 in
 		--dir) dir=$2 && shift ;;
 		--ssh-port) ssh_port=$2 && shift ;;
 		-i | --identity) identity=$2 && shift ;;
 		--no-host-setup) host_setup=0 ;;
+		--no-swap) host_flags+=' --no-swap' ;;
 		--no-local-smoke) local_smoke=0 ;;
 		--port) proxy_port=$2 && init_args+=("$1" "$2") && shift ;;
 		--http-port) http_port=$2 && init_args+=("$1" "$2") && shift ;;
@@ -923,7 +926,7 @@ cmd_deploy() {
 
 	if ((host_setup)); then
 		info "preparing the host (Docker, firewall, kernel tuning, time sync, watchdog)"
-		rsh_tty "$sudo $qdir/scripts/install-host.sh --dir $qdir --ssh-port $(printf '%q' "$ssh_port") --ports $(printf '%q' "$ports")" ||
+		rsh_tty "$sudo $qdir/scripts/install-host.sh --dir $qdir --ssh-port $(printf '%q' "$ssh_port") --ports $(printf '%q' "$ports")$host_flags" ||
 			die "host preparation failed on $target (output above)"
 	fi
 

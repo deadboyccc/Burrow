@@ -261,3 +261,16 @@ setup() {
 	done
 	assert_equal "$drift" ""
 }
+
+@test "go_mem_limit: three quarters of the container limit, as a Go size" {
+	assert_equal "$(go_mem_limit 512m)" "393216KiB"
+	assert_equal "$(go_mem_limit 1g)" "786432KiB"
+	assert_equal "$(go_mem_limit 4096k)" "3072KiB"
+}
+
+@test "compose.env: mtg gets a Go memory limit below its container limit" {
+	MTG_MEMORY_LIMIT=256m
+	run render_compose_env mtghash decoyhash
+	assert_output --partial "MTG_MEMORY_LIMIT='256m'"
+	assert_output --partial "MTG_GOMEMLIMIT='196608KiB'"
+}

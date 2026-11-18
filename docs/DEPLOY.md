@@ -124,14 +124,15 @@ What happens, in order:
 2. uploads burrow to `/opt/burrow` (never your `.env`; secrets are created on the server);
 3. runs `scripts/install-host.sh`: Docker from Docker's signed repository, ufw firewall
    (SSH rate-limited on your SSH port and every port sshd listens on, plus 80 and 443),
-   BBR tuning, NTP, unattended security upgrades, watchdog timer;
+   BBR tuning, a swap file on servers with 2 GiB of RAM or less, NTP, unattended security
+   upgrades, watchdog timer;
 4. `burrow init` on the server: generates the secret;
 5. `burrow up`: starts mtg + the decoy site and waits for the certificate;
 6. `burrow smoke` on the server, then **again from your computer across the internet**;
 7. prints your share link.
 
 Useful flags: `--ssh-port 2222`, `-i ~/.ssh/other_key`, `--dir /srv/burrow`,
-`--no-host-setup` (if you manage the server yourself), `--enable-ipv6`.
+`--no-host-setup` (if you manage the server yourself), `--no-swap`, `--enable-ipv6`.
 Re-running `deploy` later upgrades burrow and **keeps** the existing secret.
 
 ### Variant 3: by hand on the server
@@ -153,6 +154,11 @@ so Let's Encrypt can issue a real certificate and probes see a real website, exa
 with your own domain. Share links point at the IP, so phones never need that DNS service:
 
 ```bash
+# on the server: finds its public IPv4 and installs (paste as is)
+IP=$(curl -fsS4 https://api.ipify.org) &&
+  curl -fsSL https://raw.githubusercontent.com/deadboyccc/Burrow/main/install.sh |
+  sudo BURROW_DOMAIN="${IP//./-}.sslip.io" BURROW_LINK_HOST="$IP" bash
+# or with the IP written out:
 curl -fsSL https://raw.githubusercontent.com/deadboyccc/Burrow/main/install.sh |
   sudo BURROW_DOMAIN=203-0-113-7.sslip.io BURROW_LINK_HOST=203.0.113.7 bash
 # or from your computer:

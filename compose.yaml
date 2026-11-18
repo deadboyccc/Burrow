@@ -27,6 +27,9 @@ services:
     image: nineseconds/mtg:2.3.0@sha256:9553495b5216cbe6b238e88ce8a3d43ef582e4dc45fcdd7a14d54497500f5d4f
     user: "65534:65534"
     command: ["run", "/config.toml"]
+    # mtg sets no Go memory limit of its own (Caddy does, from its cgroup).
+    environment:
+      GOMEMLIMIT: ${MTG_GOMEMLIMIT:?render with ./burrow up}
     volumes:
       - type: bind
         source: ${BURROW_STATE_DIR:?render with ./burrow up}/mtg.toml

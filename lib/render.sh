@@ -239,6 +239,21 @@ render_lists() {
 	if [[ -n $LOCAL_ALLOWLIST ]]; then write_if_changed "$dir/allowlist.netset" 644 <"$LOCAL_ALLOWLIST"; else rm -f -- "$dir/allowlist.netset"; fi
 }
 
+# go_mem_limit 512m: three quarters of a Docker memory limit, as a Go
+# GOMEMLIMIT. Near the cap, mtg's garbage collector then works harder instead
+# of the kernel OOM-killing the proxy (and every connection with it). The
+# other quarter is headroom for kernel socket buffers, which count against
+# the same cgroup limit.
+go_mem_limit() {
+	local n=${1%[kmgKMG]} unit=${1: -1} kib
+	case ${unit,,} in
+	k) kib=$n ;;
+	m) kib=$((n * 1024)) ;;
+	g) kib=$((n * 1024 * 1024)) ;;
+	esac
+	printf '%dKiB\n' $((kib * 3 / 4))
+}
+
 render_compose_env() {
 	# IPv6 listeners follow BIND_ADDR: all interfaces only if IPv4 is on all
 	# interfaces too, otherwise loopback.
@@ -259,6 +274,7 @@ EDGE_SUBNET='$EDGE_SUBNET'
 EDGE_SUBNET6='$EDGE_SUBNET6'
 DECOY_IP='$DECOY_IP'
 MTG_MEMORY_LIMIT='$MTG_MEMORY_LIMIT'
+MTG_GOMEMLIMIT='$(go_mem_limit "$MTG_MEMORY_LIMIT")'
 DECOY_MEMORY_LIMIT='$DECOY_MEMORY_LIMIT'
 MTG_CONFIG_HASH='$1'
 DECOY_CONFIG_HASH='$2'

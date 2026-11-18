@@ -22,6 +22,7 @@ curl -fsSL https://raw.githubusercontent.com/deadboyccc/Burrow/main/install.sh |
 | `BURROW_DIR` / `BURROW_REF` | Install directory (`/opt/burrow`) / release to install. |
 | `BURROW_INIT_ARGS` | Extra `burrow init` flags, e.g. `"--subnet 10.77.1.0/28"`. |
 | `BURROW_SKIP_HOST_SETUP=1` | Leave Docker, the firewall and kernel settings to you. |
+| `BURROW_SWAP=0` | Never add a swap file. By default, a server with 2 GiB of RAM or less and no swap gets a 2 GiB one. |
 | `BURROW_DRY_RUN=1` | Show every step, change nothing. |
 
 On a server that is already installed, re-running the installer keeps the existing

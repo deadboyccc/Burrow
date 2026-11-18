@@ -15,6 +15,9 @@ COPY requirements.txt ./
 # Hash-locked, wheels only: no compiler, no surprise sdists.
 RUN pip install --require-hashes --only-binary=:all: --no-deps -r requirements.txt
 COPY burrow_tools ./burrow_tools
+# Byte-compile now: the runtime user can't write __pycache__ (and the root
+# filesystem is read-only), so otherwise every probe recompiles from source.
+RUN python -m compileall -q burrow_tools
 USER 65534:65534
 ENTRYPOINT ["python", "-m", "burrow_tools"]
 CMD ["--help"]

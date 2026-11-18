@@ -13,7 +13,7 @@ import sys
 import time
 from collections.abc import Callable
 
-from . import __version__, probe, qr
+from . import __version__, probe
 from .secret import Secret, SecretError
 
 VERDICTS = (probe.PROXY, probe.FRONTED, probe.CLOSED, probe.ERROR)
@@ -138,6 +138,10 @@ def cmd_plaintext(args: argparse.Namespace) -> int:
 
 
 def cmd_qr(args: argparse.Namespace) -> int:
+    # Imported here: segno is about a third of start-up time, and only this
+    # command needs it. Every probe (status, smoke, the watchdog) starts faster.
+    from . import qr  # noqa: PLC0415
+
     code = qr.make(args.text if args.text is not None else sys.stdin.read())
     if args.format == "terminal":
         sys.stdout.write(qr.terminal(code))

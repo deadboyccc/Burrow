@@ -6,6 +6,44 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-18
+
+A performance pass over the whole stack: the server set-up, the operating system, the
+proxy and the tooling.
+
+### Added
+
+- **Swap on small servers.** The installer adds a 2 GiB swap file to servers with 2 GiB of
+  RAM or less and no swap, with swappiness 10: the proxy stays in RAM, and swap only absorbs
+  real pressure, where the alternative is the kernel OOM-killing the proxy. It never touches
+  existing swap, and skips containers, filesystems other than ext4 or xfs, and disks with
+  less than 4 GiB free. Opt out with `BURROW_SWAP=0`, `install-host.sh --no-swap` or
+  `burrow deploy --no-swap`.
+- **A Go memory limit for mtg** of three quarters of its container limit (384 MiB by
+  default). Near the cap, its garbage collector works harder instead of the proxy being
+  OOM-killed with every connection. Caddy already sets its own.
+- **AGENTS.md and CLAUDE.md:** how to work on burrow, with the traps already found.
+
+### Changed
+
+- **Connection tracking is sized to the connection limit:** 65,536 hash buckets for 262,144
+  entries, set live and at boot (`/etc/modprobe.d/burrow.conf`). The kernel default on a
+  1 GB server is 8,192.
+- **Probes start about 30% faster** (Python start-up about 1.25 s → 0.87 s, measured on a
+  small server). The probe image ships precompiled, and the QR library is loaded only for QR
+  codes. This speeds up `status`, `smoke` and each watchdog run.
+- **The installer waits for the package lock** (up to 10 minutes) instead of failing when a
+  fresh server is still running its first automatic updates. It also skips packages that
+  are already installed, so re-runs and upgrades don't need the network for apt.
+- The installer's headings no longer print colour codes when the output isn't a terminal
+  or `NO_COLOR` is set.
+
+### Fixed
+
+- **`burrow status`, `smoke` and `watchdog` no longer swallow the caller's stdin.** Run
+  inside a script (`ssh host 'bash -s' <script`), they used to eat the rest of the script.
+  Only `qr` reads stdin now.
+
 ## [1.1.5] - 2026-11-18
 
 ### Fixed
@@ -265,7 +303,8 @@ First release. Digby the mole digs his first tunnel.
   release workflow with checksums, and a GitHub Pages site starring Digby.
 - Documentation: an in-depth README and an A-Z deployment guide (`docs/DEPLOY.md`).
 
-[Unreleased]: https://github.com/deadboyccc/Burrow/compare/v1.1.5...HEAD
+[Unreleased]: https://github.com/deadboyccc/Burrow/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/deadboyccc/Burrow/compare/v1.1.5...v1.2.0
 [1.1.5]: https://github.com/deadboyccc/Burrow/compare/v1.1.4...v1.1.5
 [1.1.4]: https://github.com/deadboyccc/Burrow/compare/v1.1.3...v1.1.4
 [1.1.3]: https://github.com/deadboyccc/Burrow/compare/v1.1.2...v1.1.3

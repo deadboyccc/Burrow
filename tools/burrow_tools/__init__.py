@@ -6,4 +6,4 @@ a Telegram app or a censor's active prober would, so the tests exercise the
 real wire protocol end to end.
 """
 
-__version__ = "1.1.5"
+__version__ = "1.2.0"

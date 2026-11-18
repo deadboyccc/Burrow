@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 
 import pytest
 
@@ -118,3 +120,10 @@ class TestCLI:
         assert main(["probe", "--host", "127.0.0.1", "--port", "1", "--timeout", "1", "--json"]) == 1
         out = json.loads(capsys.readouterr().out)
         assert out["ok"] is False and out["verdict"] == "error"
+
+
+def test_probes_do_not_import_the_qr_library():
+    """segno is a third of start-up time; only `qr` may load it."""
+    code = "import sys, burrow_tools.__main__; print('segno' in sys.modules)"
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "False"

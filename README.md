@@ -26,20 +26,34 @@ your messages fly through.
 
 ## Install
 
-On a fresh Debian or Ubuntu server, as root:
+On a fresh Debian or Ubuntu server, pick the command that fits you and paste it in.
+
+**You have a domain.** Point its `A` record at the server first, then run this, with your
+domain in place of `notes.example.com`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/deadboyccc/Burrow/main/install.sh |
   sudo BURROW_DOMAIN=notes.example.com bash
 ```
 
-**No domain?** Use your server's IP as a free wildcard-DNS name. It still gets a real
-certificate:
-`sudo BURROW_DOMAIN=203-0-113-7.sslip.io BURROW_LINK_HOST=203.0.113.7 bash`.
+**You have no domain.** Paste this as is. It finds the server's public IPv4 address and
+uses it as a free wildcard-DNS name (`203-0-113-7.sslip.io`), which still gets a real
+certificate. Share links point straight at the IP:
 
-That one command prepares the server (Docker, firewall, kernel tuning, automatic updates,
-watchdog), creates your secret, starts the proxy, tests it end to end, and prints your share
-link and QR code. Run it again any time to upgrade; your secret is kept.
+```bash
+IP=$(curl -fsS4 https://api.ipify.org) &&
+  curl -fsSL https://raw.githubusercontent.com/deadboyccc/Burrow/main/install.sh |
+  sudo BURROW_DOMAIN="${IP//./-}.sslip.io" BURROW_LINK_HOST="$IP" bash
+```
+
+Either command:
+- prepares the server: Docker, firewall, kernel tuning, swap on small servers, automatic
+  updates and a watchdog;
+- creates your secret and starts the proxy;
+- tests it end to end, then prints your share link and QR code.
+
+**Run the same command again any time to upgrade.** Your secret is kept. Every option
+(email, port, IPv6, …) is listed in [Configuration](docs/CONFIGURATION.md).
 
 | Prefer… | Do this |
 |---|---|
@@ -95,7 +109,7 @@ Every command is in **[Usage](docs/USAGE.md)**.
 - **Fast.**
   - A lean Go relay, with BBR network tuning.
   - A 1 CPU / 1 GB server handles hundreds of users.
-- **Tested.** 263 automated tests, including live connections to Telegram.
+- **Tested.** 275 automated tests, including live connections to Telegram.
 
 ## Documentation
 
@@ -108,7 +122,7 @@ Every command is in **[Usage](docs/USAGE.md)**.
 | [Threat model](docs/THREAT-MODEL.md) | what burrow protects against, what it doesn't, privacy |
 | [Design](docs/DESIGN.md) | how it works, and why these technologies |
 | [Development](docs/DEVELOPMENT.md) | tests, CI, project layout |
-| [Changelog](CHANGELOG.md) · [Security policy](SECURITY.md) · [Contributing](CONTRIBUTING.md) | |
+| [Changelog](CHANGELOG.md) · [Security policy](SECURITY.md) · [Contributing](CONTRIBUTING.md) · [Agent guide](AGENTS.md) | |
 
 ## Credits and license
 

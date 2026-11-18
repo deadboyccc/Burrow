@@ -124,13 +124,14 @@
       <img class="mascot" src="digby.svg" alt="Digby the mole, in aviator goggles, popping out of a burrow while a paper plane loops overhead">
     </div>
 
-    <pre><span class="c"># on your server: one command does everything (Docker, firewall, TLS, watchdog, smoke test, QR code)</span>
+    <pre><span class="c"># on your server: one command does everything (Docker, firewall, tuning, TLS, watchdog, smoke test, QR code)</span>
 curl -fsSL https://raw.githubusercontent.com/deadboyccc/Burrow/main/install.sh |
   sudo BURROW_DOMAIN=notes.example.com BURROW_EMAIL=you@example.com bash
 
-<span class="c"># no domain? your IP as a free wildcard-DNS name: still a real certificate</span>
-curl -fsSL https://raw.githubusercontent.com/deadboyccc/Burrow/main/install.sh |
-  sudo BURROW_DOMAIN=203-0-113-7.sslip.io BURROW_LINK_HOST=203.0.113.7 bash
+<span class="c"># no domain? paste as is: your IP becomes a free wildcard-DNS name, still a real certificate</span>
+IP=$(curl -fsS4 https://api.ipify.org) &amp;&amp;
+  curl -fsSL https://raw.githubusercontent.com/deadboyccc/Burrow/main/install.sh |
+  sudo BURROW_DOMAIN="${IP//./-}.sslip.io" BURROW_LINK_HOST="$IP" bash
 
 <span class="c"># or try it on your own machine first: nothing exposed, fully self-tested</span>
 git clone https://github.com/deadboyccc/Burrow.git burrow &amp;&amp; cd burrow &amp;&amp; ./burrow try</pre>
@@ -146,7 +147,7 @@ git clone https://github.com/deadboyccc/Burrow.git burrow &amp;&amp; cd burrow &
         <div class="card"><div class="icon">🔗</div><h3>Share with one link</h3><p>A <code>tg://</code> link and an offline QR code. <code>burrow rotate</code> revokes every link at once.</p></div>
         <div class="card"><div class="icon">🩺</div><h3>Self-healing</h3><p>Restart policies, Docker live-restore and a watchdog that probes the proxy every five minutes and recreates it if it hangs.</p></div>
         <div class="card"><div class="icon">⚡</div><h3>Fast</h3><p>mtg is a lean Go relay. BBR, fq and tuned buffers help on the lossy, long-distance links censored users live with.</p></div>
-        <div class="card"><div class="icon">🧪</div><h3>Tested for real</h3><p>263 automated tests, including live stacks that push real MTProto traffic to Telegram's data centres, and replay and probe attacks.</p></div>
+        <div class="card"><div class="icon">🧪</div><h3>Tested for real</h3><p>275 automated tests, including live stacks that push real MTProto traffic to Telegram's data centres, and replay and probe attacks.</p></div>
       </div>
     </div>
   </section>

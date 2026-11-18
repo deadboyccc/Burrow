@@ -66,18 +66,26 @@ ensure_tools_image() {
 # tools_in_stack ARGS...: run burrow-tools inside the stack's network.
 # PROBE_SECRET (default: SECRET) reaches the container through the
 # environment, never through argv, so it does not show up in `ps`.
+# stdin is /dev/null: `compose run` attaches stdin by default, which would
+# swallow the rest of a script that runs burrow (`ssh host 'bash -s' <script`).
 tools_in_stack() {
 	compose_args
 	BURROW_SECRET=${PROBE_SECRET:-$SECRET} docker compose --progress quiet "${COMPOSE_ARGS[@]}" \
-		run --rm --no-deps -T tools "$@"
+		run --rm --no-deps -T tools "$@" </dev/null
 }
 
 # tools_on_host ARGS...: run burrow-tools on the host network (remote checks).
+# Only `qr` reads stdin; nothing else may consume the caller's.
 tools_on_host() {
-	BURROW_SECRET=${PROBE_SECRET:-${SECRET:-}} docker run --rm -i --network host \
-		--read-only --cap-drop ALL --security-opt no-new-privileges:true \
-		--user 65534:65534 --memory 128m --pids-limit 64 \
-		-e BURROW_SECRET "$(tools_image)" "$@"
+	local run=(docker run --rm --network host
+		--read-only --cap-drop ALL --security-opt no-new-privileges:true
+		--user 65534:65534 --memory 128m --pids-limit 64
+		-e BURROW_SECRET)
+	if [[ ${1:-} == qr ]]; then
+		BURROW_SECRET=${PROBE_SECRET:-${SECRET:-}} "${run[@]}" -i "$(tools_image)" "$@"
+	else
+		BURROW_SECRET=${PROBE_SECRET:-${SECRET:-}} "${run[@]}" "$(tools_image)" "$@" </dev/null
+	fi
 }
 
 stack_running() {

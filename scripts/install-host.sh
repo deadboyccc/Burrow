@@ -2,10 +2,12 @@
 # Prepare a fresh Debian/Ubuntu server for burrow. Idempotent: safe to re-run.
 #
 #   sudo scripts/install-host.sh [--dir /opt/burrow] [--ssh-port N] [--ports 80,443]
-#                                [--no-docker] [--no-firewall] [--no-sysctl]
+#                                [--no-docker] [--no-firewall] [--no-sysctl] [--no-swap]
 #                                [--no-upgrades] [--no-watchdog] [--dry-run]
 #
 # What it does, and why:
+#   swap      2 GiB swap file on servers with 2 GiB of RAM or less and no swap,
+#             so a burst of connections or an image build can't OOM-kill the proxy
 #   docker    Docker Engine + Compose plugin from Docker's signed apt repository
 #   time      NTP sync: FakeTLS refuses clients when clocks disagree by > 5s
 #   sysctl    BBR congestion control, fq qdisc, bigger queues and buffers
@@ -19,8 +21,11 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 DIR=$ROOT
 SSH_PORT='' # explicit --ssh-port
 PORTS=80,443
-DO_DOCKER=1 DO_FIREWALL=1 DO_SYSCTL=1 DO_UPGRADES=1 DO_WATCHDOG=1 DRY_RUN=0
+DO_DOCKER=1 DO_FIREWALL=1 DO_SYSCTL=1 DO_SWAP=1 DO_UPGRADES=1 DO_WATCHDOG=1 DRY_RUN=0
+# Overridable so tests can describe a machine other than the one they run on.
 OS_RELEASE=${OS_RELEASE:-/etc/os-release}
+MEMINFO=${MEMINFO:-/proc/meminfo}
+SWAPS=${SWAPS:-/proc/swaps}
 
 log() { printf '==> %s\n' "$*" >&2; }
 note() { printf '    %s\n' "$*" >&2; }
@@ -55,11 +60,12 @@ while (($#)); do
 	--no-docker) DO_DOCKER=0 ;;
 	--no-firewall) DO_FIREWALL=0 ;;
 	--no-sysctl) DO_SYSCTL=0 ;;
+	--no-swap) DO_SWAP=0 ;;
 	--no-upgrades) DO_UPGRADES=0 ;;
 	--no-watchdog) DO_WATCHDOG=0 ;;
 	--dry-run) DRY_RUN=1 ;;
 	-h | --help)
-		sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+		sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 		exit 0
 		;;
 	*) die "unknown option: $1" ;;
@@ -111,13 +117,96 @@ SSH_PORTS=$(ssh_ports)
 
 log "host: ${PRETTY_NAME:-$DISTRO} (apt: $([[ $APT == 1 ]] && echo yes || echo no)), ssh port(s) ${SSH_PORTS:-unknown}, burrow in $DIR"
 
+# Fresh servers often run their first automatic updates right after boot, and
+# apt then fails at once with "Could not get lock". Wait for it instead (up to
+# 10 minutes), both before starting and, through DPkg::Lock::Timeout, in dpkg.
+APT_OPTS=(-o DPkg::Lock::Timeout=600)
+wait_for_apt() {
+	((DRY_RUN)) && return 0
+	command -v pgrep >/dev/null 2>&1 || return 0
+	local waited=0
+	while pgrep -x 'apt|apt-get|dpkg|unattended-upgr' >/dev/null; do
+		((waited == 0)) && note "waiting for another package manager (automatic updates?) to finish"
+		((waited >= 600)) && return 0 # let apt report the lock itself
+		sleep 5
+		waited=$((waited + 5))
+	done
+}
+
+# apt_install PKG...: install what is missing. Installed packages are skipped,
+# so a re-run or an upgrade needs no package lists and no network.
 APT_UPDATED=0
 apt_install() {
+	local pkg missing=()
+	for pkg in "$@"; do
+		dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q ' installed$' || missing+=("$pkg")
+	done
+	((${#missing[@]})) || return 0
+	wait_for_apt
 	if ((APT_UPDATED == 0)); then
-		run apt-get update -qq
+		run apt-get "${APT_OPTS[@]}" update -qq
 		APT_UPDATED=1
 	fi
-	run env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "$@"
+	run env DEBIAN_FRONTEND=noninteractive apt-get "${APT_OPTS[@]}" install -y -qq --no-install-recommends "${missing[@]}"
+}
+
+# --- Swap --------------------------------------------------------------------
+# A server with 2 GiB of RAM or less and no swap gets a 2 GiB swap file. With
+# swappiness 10 the proxy's working set stays in RAM; swap only absorbs real
+# pressure (a burst of connections, building the probe image), where the
+# alternative is the kernel OOM-killing the proxy. Never touches existing swap,
+# and skips anything unusual (containers, copy-on-write filesystems, low disk).
+SWAP_FILE=/swapfile
+setup_swap() {
+	local mem_kib fs='' free_kib='' size_kib=$((2 * 1024 * 1024))
+	mem_kib=$(awk '/^MemTotal:/ {print $2}' "$MEMINFO" 2>/dev/null || true)
+	[[ $mem_kib =~ ^[0-9]+$ ]] || return 0
+	# "2 GB" plans report a little under 2 GiB; 4 GB plans don't need this.
+	if ((mem_kib > 2560 * 1024)); then
+		return 0
+	fi
+	log "swap (this server has $((mem_kib / 1024)) MiB of RAM)"
+	if awk 'NR > 1 { found = 1 } END { exit !found }' "$SWAPS" 2>/dev/null; then
+		note "swap is already on; leaving it as it is"
+		return 0
+	fi
+	if command -v systemd-detect-virt >/dev/null 2>&1 && systemd-detect-virt --container --quiet; then
+		note "inside a container: swap belongs to the host; skipping"
+		return 0
+	fi
+	if [[ -e $SWAP_FILE ]]; then
+		note "$SWAP_FILE already exists but is not in use; leaving it alone"
+		return 0
+	fi
+	read -r fs free_kib < <(df -PTk / 2>/dev/null | awk 'NR == 2 { print $2, $5 }') || true
+	case ${fs:-} in
+	ext2 | ext3 | ext4 | xfs) ;;
+	*)
+		note "the root filesystem is ${fs:-unknown}, not ext4 or xfs; skipping swap"
+		return 0
+		;;
+	esac
+	if ! [[ $free_kib =~ ^[0-9]+$ ]] || ((free_kib < size_kib + 2 * 1024 * 1024)); then
+		note "less than 4 GiB of free disk; skipping swap"
+		return 0
+	fi
+	if ! { run fallocate -l "${size_kib}K" "$SWAP_FILE" &&
+		run chmod 600 "$SWAP_FILE" &&
+		run mkswap -q "$SWAP_FILE" &&
+		run swapon "$SWAP_FILE"; }; then
+		((DRY_RUN)) || rm -f -- "$SWAP_FILE"
+		note "this server does not allow a swap file; continuing without one"
+		return 0
+	fi
+	if ((DRY_RUN)); then
+		note "[dry-run] add $SWAP_FILE to /etc/fstab; vm.swappiness = 10"
+	else
+		grep -qE "^${SWAP_FILE}[[:space:]]" /etc/fstab || printf '%s none swap sw 0 0\n' "$SWAP_FILE" >>/etc/fstab
+		printf '# burrow: keep the proxy in RAM; swap only absorbs real pressure.\nvm.swappiness = 10\n' \
+			>/etc/sysctl.d/99-burrow-swap.conf
+		sysctl --quiet -p /etc/sysctl.d/99-burrow-swap.conf || true
+	fi
+	note "2 GiB swap file at $SWAP_FILE"
 }
 
 # --- Docker ------------------------------------------------------------------
@@ -216,12 +305,28 @@ apply_fq() {
 	fi
 }
 
+# The modprobe option only applies when the module loads (at boot); resize
+# the live table now. Never shrinks a table that is already larger.
+size_conntrack_hash() {
+	local param=/sys/module/nf_conntrack/parameters/hashsize current
+	if ((DRY_RUN)); then
+		note "[dry-run] nf_conntrack hash table: 65536 buckets"
+		return 0
+	fi
+	[[ -w $param ]] || return 0
+	current=$(<"$param")
+	[[ $current =~ ^[0-9]+$ ]] && ((current < 65536)) || return 0
+	echo 65536 2>/dev/null >"$param" || note "could not resize the conntrack table; it applies after a reboot"
+}
+
 setup_sysctl() {
 	log "kernel network tuning (BBR, fq, larger queues)"
 	if ((DRY_RUN)) || modprobe tcp_bbr 2>/dev/null || grep -qw bbr /proc/sys/net/ipv4/tcp_available_congestion_control 2>/dev/null; then
 		install_file "$ROOT/deploy/sysctl/99-burrow.conf" /etc/sysctl.d/99-burrow.conf 0644
 		install_file "$ROOT/deploy/sysctl/modules-load-burrow.conf" /etc/modules-load.d/burrow.conf 0644
+		install_file "$ROOT/deploy/sysctl/modprobe-burrow.conf" /etc/modprobe.d/burrow.conf 0644
 		((DRY_RUN)) || modprobe nf_conntrack 2>/dev/null || true
+		size_conntrack_hash
 		# Some keys are read-only in containers (LXC/OpenVZ); that must not stop
 		# the firewall and the rest of the setup.
 		run sysctl --quiet --system || note "some kernel settings could not be applied (normal in containers); continuing"
@@ -300,6 +405,7 @@ setup_watchdog() {
 	run systemctl enable --now burrow-watchdog.timer
 }
 
+((DO_SWAP)) && setup_swap
 ((DO_DOCKER)) && install_docker
 setup_time
 ((DO_SYSCTL)) && setup_sysctl

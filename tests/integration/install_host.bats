@@ -102,7 +102,8 @@ in_debian() {
 	run in_debian -e BURROW_DRY_RUN=1 -e BURROW_DOMAIN=Notes.Example.org -e BURROW_EMAIL=you@example.com \
 		-e BURROW_SSH_PORT=2222 "$DEBIAN_IMAGE" bash /burrow/install.sh
 	assert_success
-	assert_output --partial "apt-get install -y -qq --no-install-recommends git curl ca-certificates"
+	assert_output --partial "apt-get -o DPkg::Lock::Timeout=600 install -y -qq --no-install-recommends git curl ca-certificates"
+	refute_output --partial $'\033[' # no colour codes when the output is not a terminal
 	assert_output --partial "git clone --depth 1 --branch v"
 	assert_output --partial "install-host.sh --dir /opt/burrow --ports 80,443 --ssh-port 2222"
 	assert_output --partial "burrow init --port 443 --quiet --domain notes.example.org --email you@example.com"
@@ -128,4 +129,86 @@ in_debian() {
 	refute_output --partial "install-host.sh"
 	assert_output --partial "Dry run complete: nothing was changed"
 	refute_output --partial "Done. burrow is running"
+}
+
+# A machine description for the swap tests: RAM, active swap, and a `df` that
+# reports the root filesystem type and free space.
+small_server() { # MEM_KIB SWAP_LINE FS FREE_KIB
+	mkdir -p "$BATS_TEST_TMPDIR/stubs"
+	printf 'MemTotal:       %s kB\n' "$1" >"$BATS_TEST_TMPDIR/meminfo"
+	printf 'Filename\tType\tSize\tUsed\tPriority\n%s' "$2" >"$BATS_TEST_TMPDIR/swaps"
+	printf '#!/bin/sh\necho "Filesystem Type 1024-blocks Used Available Capacity Mounted"\necho "/dev/sda1 %s 40000000 1000 %s 1%% /"\n' \
+		"$3" "$4" >"$BATS_TEST_TMPDIR/stubs/df"
+	chmod +x "$BATS_TEST_TMPDIR/stubs/df"
+}
+
+in_small_server() {
+	in_debian -v "$BATS_TEST_TMPDIR:/machine:ro" -e MEMINFO=/machine/meminfo -e SWAPS=/machine/swaps \
+		-e PATH=/machine/stubs:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin "$@"
+}
+
+@test "swap: a 1 GB server without swap gets a 2 GiB swap file" {
+	small_server 1003000 "" ext4 30000000
+	run in_small_server "$DEBIAN_IMAGE" bash /burrow/scripts/install-host.sh --dry-run --ssh-port 22
+	assert_success
+	assert_output --partial "swap (this server has 979 MiB of RAM)"
+	assert_output --partial "fallocate -l 2097152K /swapfile"
+	assert_output --partial "chmod 600 /swapfile"
+	assert_output --partial "mkswap -q /swapfile"
+	assert_output --partial "swapon /swapfile"
+	assert_output --partial "vm.swappiness = 10"
+}
+
+@test "swap: existing swap, enough RAM, odd filesystems, low disk and --no-swap are left alone" {
+	small_server 1003000 "/dev/sda2 partition 1048572 0 -2" ext4 30000000
+	run in_small_server "$DEBIAN_IMAGE" bash /burrow/scripts/install-host.sh --dry-run --ssh-port 22
+	assert_output --partial "swap is already on"
+	refute_output --partial "fallocate"
+
+	small_server 4030000 "" ext4 30000000
+	run in_small_server "$DEBIAN_IMAGE" bash /burrow/scripts/install-host.sh --dry-run --ssh-port 22
+	refute_output --partial "swap ("
+	refute_output --partial "fallocate"
+
+	small_server 1003000 "" btrfs 30000000
+	run in_small_server "$DEBIAN_IMAGE" bash /burrow/scripts/install-host.sh --dry-run --ssh-port 22
+	assert_output --partial "the root filesystem is btrfs"
+	refute_output --partial "fallocate"
+
+	small_server 1003000 "" ext4 3000000
+	run in_small_server "$DEBIAN_IMAGE" bash /burrow/scripts/install-host.sh --dry-run --ssh-port 22
+	assert_output --partial "less than 4 GiB of free disk"
+	refute_output --partial "fallocate"
+
+	small_server 1003000 "" ext4 30000000
+	run in_small_server "$DEBIAN_IMAGE" bash /burrow/scripts/install-host.sh --dry-run --ssh-port 22 --no-swap
+	assert_success
+	refute_output --partial "swap ("
+	refute_output --partial "fallocate"
+}
+
+@test "install.sh: BURROW_SWAP=0 is passed on; anything but yes/no is refused" {
+	run in_debian -e BURROW_DRY_RUN=1 -e BURROW_DOMAIN=notes.example.org -e BURROW_SWAP=0 "$DEBIAN_IMAGE" bash /burrow/install.sh
+	assert_success
+	assert_output --partial "install-host.sh --dir /opt/burrow --ports 80,443 --no-swap"
+	run in_debian -e BURROW_DRY_RUN=1 -e BURROW_DOMAIN=notes.example.org -e BURROW_SWAP=maybe "$DEBIAN_IMAGE" bash /burrow/install.sh
+	assert_failure
+	assert_output --partial "BURROW_SWAP must be 1 or 0"
+}
+
+@test "apt waits for the package lock and skips installed packages" {
+	run in_debian "$DEBIAN_IMAGE" bash /burrow/scripts/install-host.sh --dry-run --ssh-port 22
+	assert_success
+	assert_output --partial "apt-get -o DPkg::Lock::Timeout=600 update -qq"
+	# ca-certificates is already in the image; curl is not.
+	assert_output --partial "--no-install-recommends curl"
+	refute_output --partial "ca-certificates curl"
+}
+
+@test "kernel tuning: the conntrack hash table is sized to the connection limit" {
+	run in_debian "$DEBIAN_IMAGE" bash /burrow/scripts/install-host.sh --dry-run --ssh-port 22
+	assert_success
+	assert_output --partial "/etc/modprobe.d/burrow.conf"
+	assert_output --partial "nf_conntrack hash table: 65536 buckets"
+	grep -q '^options nf_conntrack hashsize=65536$' "$BURROW_ROOT/deploy/sysctl/modprobe-burrow.conf"
 }

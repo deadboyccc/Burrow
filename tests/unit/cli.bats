@@ -150,11 +150,11 @@ init_stealth() {
 	printf '#!/bin/sh\nexit 1\n' >"$BATS_TEST_TMPDIR/bin/docker"
 	chmod +x "$BATS_TEST_TMPDIR/bin/docker"
 	# A valid base64 link (fake secret) gets past parsing and only then needs Docker.
-	PATH=$BATS_TEST_TMPDIR/bin:$PATH run burrow smoke --link "tg://proxy?server=203.0.113.7&port=443&secret=7gARIjNEVWZ3iJmqu8zd7v9ub3Rlcy5leGFtcGxlLm9yZw"
+	PATH=$BATS_TEST_TMPDIR/bin:$PATH run burrow smoke --link "tg://proxy?server=203.0.113.7&port=443&secret=7gARIjNEVWZ3iJmqu8zd7v9ub3Rlcy5leGFtcGxlLm9yZw" # gitleaks:allow (fake fixture)
 	assert_failure
 	assert_output --partial "Docker daemon"
 	# A legacy (non-FakeTLS) secret is rejected before Docker is consulted.
-	PATH=$BATS_TEST_TMPDIR/bin:$PATH run burrow smoke --link "tg://proxy?server=203.0.113.7&port=443&secret=3QARIjNEVWZ3iJmqu8zd7v9ub3Rlcy5leGFtcGxlLm9yZw"
+	PATH=$BATS_TEST_TMPDIR/bin:$PATH run burrow smoke --link "tg://proxy?server=203.0.113.7&port=443&secret=3QARIjNEVWZ3iJmqu8zd7v9ub3Rlcy5leGFtcGxlLm9yZw" # gitleaks:allow (fake fixture)
 	assert_failure
 	assert_output --partial "does not carry a FakeTLS secret"
 	refute_output --partial "Docker daemon"

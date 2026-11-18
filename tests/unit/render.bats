@@ -231,3 +231,19 @@ setup() {
 	assert_output ""
 	[[ -f $STATE_DIR/site/index.html ]]
 }
+
+@test "privacy: the decoy never keeps access logs" {
+	run render_caddyfile
+	refute_output --regexp '(^|[[:space:]])log([[:space:]]|$)'
+	TLS_MODE=acme ACME_EMAIL=me@example.org
+	run render_caddyfile
+	refute_output --regexp '(^|[[:space:]])log([[:space:]]|$)'
+}
+
+@test "privacy: mtg runs without debug logging unless DEBUG=true" {
+	run render_mtg_toml
+	assert_line "debug = false"
+	DEBUG=true
+	run render_mtg_toml
+	assert_line "debug = true"
+}

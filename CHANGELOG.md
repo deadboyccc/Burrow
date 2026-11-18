@@ -6,11 +6,29 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-11-18
+
+A documentation release: what burrow records about the people who use your proxy, verified
+against mtg's source and a live server. There are no behaviour changes; upgrading is optional.
+
 ### Fixed
 
-- The docs said mtg logs client IPs with `LOGGING=on`. In fact it logs only warnings:
-  routine connections are never logged, and a client's IP appears only in a few
-  connection-error warnings. `DEBUG=true` logs every connection with its IP.
+- **The logging docs were wrong.** The README, `.env.example`, the comment in every
+  generated `.env` and `compose.nolog.yaml` claimed that mtg logs client IPs with
+  `LOGGING=on`. In fact mtg (v2.3.0, without `DEBUG`) logs at warning level only:
+  - connection starts and blocklist/allowlist rejections are never written;
+  - a client's IP appears only in a few connection-error warnings (for example when
+    Telegram can't be reached);
+  - `DEBUG=true` logs every connection with its IP.
+
+### Changed
+
+- The README's security section, the deployment guide and the website now say what is
+  and isn't recorded: no connection logs by default, no decoy access logs, and a host
+  firewall that logs only blocked packets. Anyone with root can still see live
+  connections.
+- New regression tests keep those guarantees: the decoy never gets an access log, and
+  mtg runs without debug logging unless `DEBUG=true`.
 
 ## [1.1.1] - 2026-11-18
 
@@ -178,7 +196,8 @@ First release. Digby the mole digs his first tunnel.
   release workflow with checksums, and a GitHub Pages site starring Digby.
 - Documentation: an in-depth README and an A-Z deployment guide (`docs/DEPLOY.md`).
 
-[Unreleased]: https://github.com/deadboyccc/Burrow/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/deadboyccc/Burrow/compare/v1.1.2...HEAD
+[1.1.2]: https://github.com/deadboyccc/Burrow/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/deadboyccc/Burrow/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/deadboyccc/Burrow/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/deadboyccc/Burrow/releases/tag/v1.0.0

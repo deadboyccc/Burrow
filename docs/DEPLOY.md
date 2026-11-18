@@ -253,6 +253,10 @@ links) through a channel you trust. Anyone with the link can use your proxy.
 | Change settings | `./burrow config set KEY VALUE && ./burrow up` |
 | Back up | copy `/opt/burrow/.env` somewhere safe (it holds the secret) |
 
+**Privacy:** in normal mode nothing records who connects. `./burrow status` shows how many
+clients are connected right now; past connections leave no trace except the rare error
+warning. Turn on `DEBUG=true` only while troubleshooting: it logs every client's IP.
+
 The watchdog checks the proxy every 5 minutes and restarts it if it hangs
 (`systemctl list-timers burrow-watchdog.timer`, logs: `journalctl -u burrow-watchdog`).
 Certificates renew themselves. Security updates install themselves.

@@ -112,7 +112,7 @@ impersonates a third-party site, is the last resort: easier to set up, easier to
 * **One entry point:** `./burrow` (plain Bash, no runtime dependencies beyond Docker)
   renders configs, starts, checks, shares, rotates, tests and deploys. You never
   hand-edit a TOML or Caddyfile.
-* **Tested like software:** 261 automated tests, including live end-to-end runs that
+* **Tested like software:** 263 automated tests, including live end-to-end runs that
   push real MTProto traffic to Telegram's data centres (see [Testing](#10-testing)).
 
 ---
@@ -356,11 +356,14 @@ Rules for your own pages:
 * **It can't hide that a server exists.** A sufficiently motivated censor can still block
   your IP. Have a plan B: another server, `LINK_HOST`, `UPSTREAM_PROXIES`.
 * **Anyone with the link can use the proxy.** Share accordingly; rotate if it leaks.
-* **The operator can see metadata.** In normal mode nothing records who connects: mtg
-  logs only warnings, and a client's IP appears only when its connection fails with an error
-  (for example when Telegram can't be reached). Anyone with root on the server can still see
-  live connections. `DEBUG=true` logs every connection with its IP; `LOGGING=off` keeps no
-  logs at all.
+* **The operator can see metadata, but nothing is recorded by default.**
+  - mtg logs only warnings. A client's IP appears only when its connection fails with an
+    error, for example when Telegram can't be reached.
+  - The decoy keeps no access logs.
+  - The host firewall logs only packets it blocks; proxy traffic is never logged.
+  - Anyone with root on the server can still see live connections.
+  - `DEBUG=true` logs every connection with its IP; `LOGGING=off` keeps no container logs
+    at all.
 
 ### Host hardening done by `scripts/install-host.sh`
 
@@ -426,7 +429,7 @@ make lint              # shellcheck, shfmt, ruff, compose validation
 
 | Suite | What it proves |
 |---|---|
-| **unit/** (bats, 112 tests) | validators reject injection; `.env` parsing never executes code; secrets, links, rendering, permissions, inode-stable re-rendering, the CLI's argument handling. |
+| **unit/** (bats, 114 tests) | validators reject injection; `.env` parsing never executes code; secrets, links, rendering, permissions, inode-stable re-rendering, the CLI's argument handling. |
 | **tools/tests/** (pytest, 92 tests) | the FakeTLS/obfuscated2/MTProto client against a line-by-line port of mtg's server checks; a full Telegram round trip through a fake relay; probe verdicts and time budgets against hostile and quirky in-process servers (endless empty records, slow drips, resets, terminal-escape injection); QR output. |
 | **integration/** (29 tests) | the pinned **mtg binary** accepts every config variant; **Caddy** validates every Caddyfile; the compose model is hardened (caps, users, ports, digests); `install-host.sh` plans the right steps in a real Debian container (dry run). |
 | **e2e/** (28 tests) | full stacks: all smoke checks including **real Telegram resPQ round trips**; link testing from the host network; container hardening as actually run; decoy pages, 404s, headers and redirects; rotation revokes old links; crash recovery (`kill -9`); hang recovery (watchdog); block and allow lists; clock-skew rejection; simple mode against a real cover site; the whole `burrow try` flow; `burrow deploy` end to end (upload, init on the "server", smoke from both ends, re-deploy keeps the secret); the one-command installer for real (fetch, configure, start, smoke, share, then an in-place upgrade that keeps the secret). |

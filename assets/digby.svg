@@ -1,81 +1,206 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-labelledby="digby-title digby-desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="digby-title digby-desc">
   <title id="digby-title">Digby, the burrow mole</title>
-  <desc id="digby-desc">A round little mole wearing aviator goggles pops out of its burrow while a paper plane loops overhead.</desc>
+  <desc id="digby-desc">A round little mole in brass aviator goggles and a red scarf pops out of its burrow at dawn, while a paper plane loops overhead.</desc>
   <defs>
-    <radialGradient id="fur" cx="45%" cy="35%" r="75%">
-      <stop offset="0" stop-color="#7a6459"/>
-      <stop offset="1" stop-color="#4e3d36"/>
-    </radialGradient>
-    <linearGradient id="soil" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#a06a44"/>
-      <stop offset="1" stop-color="#7a4b2e"/>
+    <clipPath id="badge"><circle cx="256" cy="256" r="244"/></clipPath>
+    <clipPath id="head"><path d="M158 446 C 140 340, 170 218, 256 212 C 342 218, 372 340, 354 446 Z"/></clipPath>
+
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a9d6f0"/>
+      <stop offset="0.55" stop-color="#e3f1f3"/>
+      <stop offset="1" stop-color="#fde3cc"/>
     </linearGradient>
-    <clipPath id="head">
-      <path d="M66 216 C 58 150, 82 92, 128 90 C 174 92, 198 150, 190 216 Z"/>
-    </clipPath>
-    <radialGradient id="lens" cx="35%" cy="35%" r="70%">
-      <stop offset="0" stop-color="#e6f6ff"/>
-      <stop offset="1" stop-color="#8fd0f5"/>
+    <radialGradient id="sunglow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#fff4c9" stop-opacity="0.95"/>
+      <stop offset="0.45" stop-color="#ffe9a8" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#ffe9a8" stop-opacity="0"/>
     </radialGradient>
+    <linearGradient id="hillFar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#bcdcae"/>
+      <stop offset="1" stop-color="#a5cf98"/>
+    </linearGradient>
+    <linearGradient id="hillNear" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#93c487"/>
+      <stop offset="1" stop-color="#78b06d"/>
+    </linearGradient>
+    <linearGradient id="soil" x1="0" y1="400" x2="0" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#b98457"/>
+      <stop offset="1" stop-color="#7f5233"/>
+    </linearGradient>
+    <radialGradient id="hole" cx="0.5" cy="0.35" r="0.65">
+      <stop offset="0" stop-color="#1c110c"/>
+      <stop offset="1" stop-color="#3d2619"/>
+    </radialGradient>
+    <radialGradient id="fur" cx="0.4" cy="0.28" r="0.8">
+      <stop offset="0" stop-color="#8f7466"/>
+      <stop offset="0.55" stop-color="#6a5248"/>
+      <stop offset="1" stop-color="#46342d"/>
+    </radialGradient>
+    <radialGradient id="muzzle" cx="0.5" cy="0.35" r="0.7">
+      <stop offset="0" stop-color="#f6dfcd"/>
+      <stop offset="1" stop-color="#ddb495"/>
+    </radialGradient>
+    <radialGradient id="blush" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#f58fae" stop-opacity="0.75"/>
+      <stop offset="1" stop-color="#f58fae" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="nose" cx="0.4" cy="0.3" r="0.75">
+      <stop offset="0" stop-color="#ffb3cb"/>
+      <stop offset="1" stop-color="#e2648f"/>
+    </radialGradient>
+    <linearGradient id="brass" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffe0a3"/>
+      <stop offset="0.5" stop-color="#e3a95c"/>
+      <stop offset="1" stop-color="#a8692f"/>
+    </linearGradient>
+    <linearGradient id="lens" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e9f8ff"/>
+      <stop offset="0.5" stop-color="#9fd6f3"/>
+      <stop offset="1" stop-color="#5fa9d6"/>
+    </linearGradient>
+    <linearGradient id="scarf" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f27a5a"/>
+      <stop offset="1" stop-color="#c8432f"/>
+    </linearGradient>
+    <linearGradient id="scarfTail" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#d94f38"/>
+      <stop offset="1" stop-color="#f28a66"/>
+    </linearGradient>
+    <radialGradient id="paw" cx="0.45" cy="0.35" r="0.7">
+      <stop offset="0" stop-color="#fbd3c4"/>
+      <stop offset="1" stop-color="#e8a493"/>
+    </radialGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6"/>
+    </filter>
   </defs>
 
-  <!-- flight path of the paper plane -->
-  <path d="M150 74 C 150 34, 196 22, 206 50" fill="none" stroke="#8ec5ea" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="2 9"/>
+  <g clip-path="url(#badge)">
+    <!-- dawn sky -->
+    <rect width="512" height="512" fill="url(#sky)"/>
+    <circle cx="150" cy="150" r="96" fill="url(#sunglow)"/>
+    <circle cx="150" cy="150" r="34" fill="#fff6d6"/>
 
-  <!-- paper plane -->
-  <g transform="translate(200 30) rotate(18)">
-    <path d="M0 22 L44 0 L30 40 L20 28 Z" fill="#ffffff" stroke="#2f7fc1" stroke-width="3" stroke-linejoin="round"/>
-    <path d="M44 0 L20 28 L18 40 L26 31" fill="#dceefb" stroke="#2f7fc1" stroke-width="3" stroke-linejoin="round"/>
+    <!-- clouds -->
+    <g fill="#ffffff" opacity="0.92">
+      <circle cx="236" cy="84" r="16"/>
+      <circle cx="260" cy="72" r="24"/>
+      <circle cx="285" cy="84" r="16"/>
+      <rect x="220" y="82" width="82" height="18" rx="9"/>
+    </g>
+    <g fill="#ffffff" opacity="0.8" transform="translate(398 224) scale(0.55)">
+      <circle cx="18" cy="12" r="18"/>
+      <circle cx="44" cy="0" r="26"/>
+      <circle cx="70" cy="12" r="18"/>
+      <rect x="0" y="10" width="88" height="20" rx="10"/>
+    </g>
+
+    <!-- hills -->
+    <path d="M0 352 C 90 316, 170 326, 250 348 C 330 370, 420 326, 512 336 L512 512 L0 512 Z" fill="url(#hillFar)"/>
+    <path d="M0 392 C 110 360, 200 372, 290 388 C 380 404, 450 380, 512 386 L512 512 L0 512 Z" fill="url(#hillNear)"/>
+
+    <!-- the mound and the back of the burrow -->
+    <path d="M40 512 C 60 430, 150 398, 256 398 C 362 398, 452 430, 472 512 Z" fill="url(#soil)"/>
+    <ellipse cx="256" cy="420" rx="112" ry="26" fill="url(#hole)"/>
+
+    <!-- paper plane and its loop -->
+    <path d="M292 204 C 270 160, 304 118, 334 146 C 352 164, 338 182, 356 170" fill="none" stroke="#ffffff" stroke-width="8" stroke-linecap="round" stroke-dasharray="1 15" opacity="0.95"/>
+    <g transform="translate(352 118) rotate(-14) scale(0.82)">
+      <path d="M2 34 L92 0 L62 74 L42 52 Z" fill="#000000" opacity="0.08" transform="translate(4 8)"/>
+      <path d="M2 34 L92 0 L62 74 L42 52 Z" fill="#ffffff" stroke="#2c6ea6" stroke-width="4.5" stroke-linejoin="round"/>
+      <path d="M92 0 L42 52 L38 72 L54 58" fill="#d3e8f8" stroke="#2c6ea6" stroke-width="4.5" stroke-linejoin="round"/>
+    </g>
+
+    <!-- Digby: body, fur and head tuft -->
+    <path d="M158 446 C 140 340, 170 218, 256 212 C 342 218, 372 340, 354 446 Z" fill="url(#fur)"/>
+    <g clip-path="url(#head)">
+      <path d="M332 250 C 360 300, 368 360, 360 430" fill="none" stroke="#a88a7b" stroke-width="10" stroke-linecap="round" opacity="0.35"/>
+      <g fill="none" stroke="#9c8072" stroke-width="4" stroke-linecap="round" opacity="0.45">
+        <path d="M190 300 q8 -6 14 2"/>
+        <path d="M178 336 q8 -6 14 2"/>
+        <path d="M322 304 q8 -6 14 2"/>
+        <path d="M330 342 q8 -6 14 2"/>
+        <path d="M232 222 q8 -6 14 2"/>
+        <path d="M270 222 q8 -6 14 2"/>
+      </g>
+    </g>
+    <path d="M238 216 C 236 192, 256 184, 254 206 M256 212 C 262 186, 286 190, 276 214" fill="none" stroke="#5a443b" stroke-width="9" stroke-linecap="round"/>
+
+    <!-- goggles: stitched leather strap, brass rims, sky in the lenses -->
+    <g clip-path="url(#head)">
+      <path d="M140 286 Q256 200 372 286" fill="none" stroke="#7d4526" stroke-width="20"/>
+      <path d="M140 286 Q256 200 372 286" fill="none" stroke="#d9a273" stroke-width="2.5" stroke-dasharray="7 7"/>
+    </g>
+    <circle cx="219" cy="242" r="30" fill="url(#lens)" stroke="url(#brass)" stroke-width="11"/>
+    <circle cx="293" cy="242" r="30" fill="url(#lens)" stroke="url(#brass)" stroke-width="11"/>
+    <circle cx="219" cy="242" r="24" fill="none" stroke="#6b4a2b" stroke-width="2.5" opacity="0.35"/>
+    <circle cx="293" cy="242" r="24" fill="none" stroke="#6b4a2b" stroke-width="2.5" opacity="0.35"/>
+    <path d="M247 238 Q256 229 265 238" fill="none" stroke="url(#brass)" stroke-width="8" stroke-linecap="round"/>
+    <path d="M203 234 Q208 221 222 219" fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round" opacity="0.9"/>
+    <path d="M277 234 Q282 221 296 219" fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round" opacity="0.9"/>
+    <circle cx="231" cy="254" r="3.2" fill="#ffffff" opacity="0.8"/>
+    <circle cx="305" cy="254" r="3.2" fill="#ffffff" opacity="0.8"/>
+
+    <!-- face -->
+    <ellipse cx="256" cy="322" rx="76" ry="56" fill="url(#muzzle)"/>
+    <ellipse cx="214" cy="290" rx="12" ry="14" fill="#1f1a24"/>
+    <ellipse cx="298" cy="290" rx="12" ry="14" fill="#1f1a24"/>
+    <circle cx="209" cy="284" r="5" fill="#ffffff"/>
+    <circle cx="293" cy="284" r="5" fill="#ffffff"/>
+    <circle cx="218" cy="296" r="2.2" fill="#ffffff" opacity="0.8"/>
+    <circle cx="302" cy="296" r="2.2" fill="#ffffff" opacity="0.8"/>
+    <ellipse cx="190" cy="328" rx="24" ry="15" fill="url(#blush)"/>
+    <ellipse cx="322" cy="328" rx="24" ry="15" fill="url(#blush)"/>
+    <ellipse cx="256" cy="310" rx="25" ry="18" fill="url(#nose)"/>
+    <ellipse cx="247" cy="303" rx="8.5" ry="5" fill="#ffffff" opacity="0.85"/>
+    <path d="M240 340 Q248 350 256 340 Q264 350 272 340" fill="none" stroke="#6b4436" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <g stroke="#b2927f" stroke-width="3" stroke-linecap="round" opacity="0.85">
+      <path d="M200 326 L154 316"/>
+      <path d="M200 336 L156 342"/>
+      <path d="M312 326 L358 316"/>
+      <path d="M312 336 L356 342"/>
+    </g>
+
+    <!-- aviator scarf, tail streaming in the wind -->
+    <path d="M330 384 C 366 378, 392 356, 428 354 C 420 368, 424 380, 440 388 C 404 396, 380 418, 338 410 Z" fill="url(#scarfTail)"/>
+    <g stroke="#ffd2c2" stroke-width="3" stroke-linecap="round" opacity="0.8">
+      <path d="M428 354 L436 348"/>
+      <path d="M432 371 L442 369"/>
+      <path d="M440 388 L448 392"/>
+    </g>
+    <path d="M168 372 C 208 398, 304 398, 344 372 L 348 400 C 306 426, 206 426, 164 400 Z" fill="url(#scarf)"/>
+    <path d="M176 386 C 214 408, 298 408, 336 386" fill="none" stroke="#ffd2c2" stroke-width="4" stroke-linecap="round" opacity="0.7"/>
+    <ellipse cx="334" cy="398" rx="18" ry="14" fill="#d84a34"/>
+
+    <!-- the front lip of the burrow covers the bottom of the body -->
+    <path d="M144 420 C 168 452, 344 452, 368 420 C 420 430, 452 460, 466 512 L46 512 C 60 460, 92 430, 144 420 Z" fill="url(#soil)"/>
+    <path d="M150 426 C 186 452, 326 452, 362 426" fill="none" stroke="#cf9a6c" stroke-width="7" stroke-linecap="round" opacity="0.9"/>
+
+    <!-- paws resting on the rim -->
+    <ellipse cx="200" cy="434" rx="32" ry="19" fill="url(#paw)" stroke="#c9806f" stroke-width="3"/>
+    <ellipse cx="312" cy="434" rx="32" ry="19" fill="url(#paw)" stroke="#c9806f" stroke-width="3"/>
+    <g stroke="#fff3ea" stroke-width="3.5" stroke-linecap="round">
+      <path d="M186 446 L183 455"/>
+      <path d="M200 448 L200 458"/>
+      <path d="M214 446 L217 455"/>
+      <path d="M298 446 L295 455"/>
+      <path d="M312 448 L312 458"/>
+      <path d="M326 446 L329 455"/>
+    </g>
+
+    <!-- pebbles and grass -->
+    <g fill="#d3a378">
+      <ellipse cx="110" cy="476" rx="9" ry="6"/>
+      <ellipse cx="404" cy="470" rx="7" ry="5"/>
+      <ellipse cx="380" cy="492" rx="5" ry="3.5"/>
+    </g>
+    <g fill="none" stroke="#5f9e55" stroke-width="5" stroke-linecap="round">
+      <path d="M70 470 q-4 -20 -14 -28 M74 470 q2 -22 10 -30 M78 470 q8 -14 20 -18"/>
+      <path d="M432 470 q-6 -18 -16 -24 M436 470 q2 -20 10 -28 M440 470 q8 -12 18 -16"/>
+    </g>
   </g>
 
-  <!-- soil mound -->
-  <ellipse cx="128" cy="226" rx="108" ry="24" fill="url(#soil)"/>
-  <path d="M34 220 Q50 204 70 212 Q84 198 100 208" fill="none" stroke="#b98058" stroke-width="5" stroke-linecap="round"/>
-  <circle cx="200" cy="214" r="5" fill="#b98058"/>
-  <circle cx="214" cy="224" r="3.5" fill="#b98058"/>
-  <ellipse cx="128" cy="214" rx="68" ry="14" fill="#3a2418"/>
-
-  <!-- body -->
-  <path d="M66 216 C 58 150, 82 92, 128 90 C 174 92, 198 150, 190 216 Z" fill="url(#fur)"/>
-  <path d="M112 92 Q118 76 126 90 Q130 74 140 92" fill="none" stroke="#4e3d36" stroke-width="5" stroke-linecap="round"/>
-
-  <!-- goggles pushed up on the forehead -->
-  <path d="M60 122 Q128 86 196 122" fill="none" stroke="#c9813f" stroke-width="9" clip-path="url(#head)"/>
-  <circle cx="106" cy="104" r="17" fill="url(#lens)" stroke="#e0a15c" stroke-width="6"/>
-  <circle cx="150" cy="104" r="17" fill="url(#lens)" stroke="#e0a15c" stroke-width="6"/>
-  <path d="M122 104 Q128 99 134 104" fill="none" stroke="#e0a15c" stroke-width="5" stroke-linecap="round"/>
-  <path d="M98 98 Q102 93 108 93" fill="none" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round"/>
-  <path d="M142 98 Q146 93 152 93" fill="none" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round"/>
-
-  <!-- face -->
-  <ellipse cx="128" cy="156" rx="40" ry="30" fill="#d8b49d"/>
-  <circle cx="104" cy="134" r="6.5" fill="#1d1b26"/>
-  <circle cx="152" cy="134" r="6.5" fill="#1d1b26"/>
-  <circle cx="102" cy="131.5" r="2.2" fill="#ffffff"/>
-  <circle cx="150" cy="131.5" r="2.2" fill="#ffffff"/>
-  <ellipse cx="90" cy="156" rx="10" ry="6" fill="#f4a3bd" opacity="0.75"/>
-  <ellipse cx="166" cy="156" rx="10" ry="6" fill="#f4a3bd" opacity="0.75"/>
-  <ellipse cx="128" cy="146" rx="13" ry="9.5" fill="#f28daf"/>
-  <ellipse cx="124" cy="143" rx="4" ry="2.5" fill="#ffffff" opacity="0.8"/>
-  <path d="M119 162 Q123.5 167 128 162 Q132.5 167 137 162" fill="none" stroke="#5a3a30" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-  <g stroke="#8a6a5a" stroke-width="2.2" stroke-linecap="round">
-    <path d="M100 160 L80 156"/>
-    <path d="M100 166 L82 168"/>
-    <path d="M156 160 L176 156"/>
-    <path d="M156 166 L174 168"/>
-  </g>
-
-  <!-- paws on the edge of the burrow -->
-  <g fill="#f2b7a8" stroke="#c98778" stroke-width="2">
-    <ellipse cx="96" cy="206" rx="17" ry="11"/>
-    <ellipse cx="160" cy="206" rx="17" ry="11"/>
-  </g>
-  <g stroke="#c98778" stroke-width="2" stroke-linecap="round">
-    <path d="M88 210 L86 215"/>
-    <path d="M96 211 L96 216"/>
-    <path d="M104 210 L106 215"/>
-    <path d="M152 210 L150 215"/>
-    <path d="M160 211 L160 216"/>
-    <path d="M168 210 L170 215"/>
-  </g>
+  <!-- badge rim -->
+  <circle cx="256" cy="256" r="244" fill="none" stroke="#ffffff" stroke-width="8"/>
+  <circle cx="256" cy="256" r="250" fill="none" stroke="#8a5a3b" stroke-width="4" opacity="0.55"/>
 </svg>

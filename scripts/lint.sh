@@ -17,7 +17,7 @@ run() { docker run --rm --network none --user "$(id -u):$(id -g)" -v "$ROOT:/src
 run_rw() { docker run --rm --network none --user "$(id -u):$(id -g)" -v "$ROOT:/src" -w /src "$@"; }
 
 mapfile -t shell_files < <(
-	printf '%s\n' burrow
+	printf '%s\n' burrow install.sh
 	find lib scripts tests -type f \( -name '*.sh' -o -name '*.bash' \) -not -path 'tests/.deps/*' | sort
 )
 mapfile -t bats_files < <(find tests -type f -name '*.bats' -not -path 'tests/.deps/*' | sort)

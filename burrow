@@ -785,7 +785,7 @@ project_files() {
 	for f in burrow lib compose.yaml compose.ipv6.yaml compose.nolog.yaml site site.local \
 		tools/Dockerfile tools/.dockerignore tools/pyproject.toml tools/requirements.txt \
 		tools/requirements-dev.txt tools/burrow_tools tools/tests scripts deploy \
-		README.md LICENSE CHANGELOG.md SECURITY.md .env.example; do
+		install.sh README.md LICENSE CHANGELOG.md SECURITY.md .env.example; do
 		[[ -e $BURROW_ROOT/$f ]] && printf '%s\n' "$f"
 	done
 }

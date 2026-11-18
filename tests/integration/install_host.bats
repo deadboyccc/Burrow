@@ -97,3 +97,24 @@ in_debian() {
 	grep -q '^net.ipv4.tcp_congestion_control = bbr$' "$BURROW_ROOT/deploy/sysctl/99-burrow.conf"
 	grep -q '^net.core.default_qdisc = fq$' "$BURROW_ROOT/deploy/sysctl/99-burrow.conf"
 }
+
+@test "install.sh dry run plans the whole one-command install" {
+	run in_debian -e BURROW_DRY_RUN=1 -e BURROW_DOMAIN=Notes.Example.org -e BURROW_EMAIL=you@example.com \
+		-e BURROW_SSH_PORT=2222 "$DEBIAN_IMAGE" bash /burrow/install.sh
+	assert_success
+	assert_output --partial "apt-get install -y -qq --no-install-recommends git curl ca-certificates"
+	assert_output --partial "clone --quiet --depth 1 --branch v"
+	assert_output --partial "install-host.sh --dir /opt/burrow --ports 80,443 --ssh-port 2222"
+	assert_output --partial "burrow init --port 443 --quiet --domain notes.example.org --email you@example.com"
+	assert_output --partial "/opt/burrow/burrow up"
+	assert_output --partial "/opt/burrow/burrow smoke"
+	assert_output --partial "/opt/burrow/burrow share"
+}
+
+@test "install.sh dry run in simple mode opens only the proxy port" {
+	run in_debian -e BURROW_DRY_RUN=1 -e BURROW_COVER_DOMAIN=www.wikipedia.org "$DEBIAN_IMAGE" bash /burrow/install.sh
+	assert_success
+	assert_output --partial "--ports 443"
+	refute_output --partial "--ports 80,443"
+	assert_output --partial "init --port 443 --quiet --mode simple --cover-domain www.wikipedia.org"
+}

@@ -25,6 +25,15 @@ probe) it is just an ordinary personal website.
 Meet **Digby** 🐾, the mole on top: moles dig tunnels under walls, and this one wears
 flying goggles because your messages fly through.
 
+**One command on your server** (Debian/Ubuntu, as root) and you're done:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/deadboyccc/Burrow/main/install.sh |
+  sudo BURROW_DOMAIN=notes.example.com BURROW_EMAIL=you@example.com bash
+```
+
+Or from your laptop:
+
 ```bash
 git clone https://github.com/deadboyccc/Burrow.git burrow && cd burrow
 ./burrow try                                   # throwaway instance on 127.0.0.1, fully self-tested
@@ -99,7 +108,7 @@ have no domain, **simple mode** impersonates a third-party site instead: easier,
 * **One entry point:** `./burrow` (plain Bash, no runtime dependencies beyond Docker)
   renders configs, starts, checks, shares, rotates, tests and deploys. You never
   hand-edit a TOML or Caddyfile.
-* **Tested like software:** 182 automated tests, including live end-to-end runs that
+* **Tested like software:** 234 automated tests, including live end-to-end runs that
   push real MTProto traffic to Telegram's data centres (see [Testing](#10-testing)).
 
 ---
@@ -153,6 +162,38 @@ just like any website.
 
 **Requirements:** Linux (or macOS) with Docker Engine 25+ and Compose ≥ 2.24.4, Bash ≥ 4.4.
 On a fresh Debian/Ubuntu server, `scripts/install-host.sh` installs all of it.
+
+### Install on a server (one command)
+
+Run this **on the server**, as root. Settings are environment variables:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/deadboyccc/Burrow/main/install.sh |
+  sudo BURROW_DOMAIN=notes.example.com BURROW_EMAIL=you@example.com bash
+
+# no domain? simple mode, impersonating a popular site your users can reach:
+curl -fsSL https://raw.githubusercontent.com/deadboyccc/Burrow/main/install.sh |
+  sudo BURROW_COVER_DOMAIN=www.wikipedia.org bash
+```
+
+It installs git/curl if needed, fetches the pinned burrow release into `/opt/burrow`,
+prepares the host (Docker, firewall, BBR, NTP, unattended upgrades, watchdog), creates
+the secret, starts the proxy, runs the full smoke test, and prints your links and QR
+code. **Re-run the same command to upgrade.** It keeps your secret.
+
+| Variable | Meaning |
+|---|---|
+| `BURROW_DOMAIN` | stealth mode: your domain (A record → this server) |
+| `BURROW_COVER_DOMAIN` | simple mode: a popular HTTPS site reachable where your users are |
+| `BURROW_EMAIL` | Let's Encrypt account email (optional) |
+| `BURROW_PORT` | public proxy port (default `443`) |
+| `BURROW_LINK_HOST` | what links point at (default: the domain, or the IP in simple mode) |
+| `BURROW_ENABLE_IPV6` | `true` to also listen on IPv6 |
+| `BURROW_SSH_PORT` | your SSH port, if it can't be detected (sshd's ports are always kept open) |
+| `BURROW_DIR` / `BURROW_REF` | install directory (`/opt/burrow`) / release to install |
+| `BURROW_INIT_ARGS` | extra `burrow init` flags, e.g. `"--subnet 10.77.1.0/28"` |
+| `BURROW_SKIP_HOST_SETUP=1` | leave Docker, firewall and sysctl to you |
+| `BURROW_DRY_RUN=1` | print every step, change nothing |
 
 ### Try it locally (2 minutes, nothing exposed)
 
@@ -366,10 +407,10 @@ make lint              # shellcheck, shfmt, ruff, compose validation
 
 | Suite | What it proves |
 |---|---|
-| **unit/** (bats, 77 tests) | validators reject injection; `.env` parsing never executes code; secrets, links, rendering, permissions, inode-stable re-rendering, the CLI's argument handling. |
-| **tools/tests/** (pytest, 59 tests) | the FakeTLS/obfuscated2/MTProto client against a line-by-line port of mtg's server checks; probe verdicts against in-process fake servers; QR output. |
-| **integration/** (22 tests) | the pinned **mtg binary** accepts every config variant; **Caddy** validates every Caddyfile; the compose model is hardened (caps, users, ports, digests); `install-host.sh` plans the right steps in a real Debian container (dry run). |
-| **e2e/** (24 tests) | full stacks: all smoke checks including **real Telegram resPQ round trips**; link testing from the host network; container hardening as actually run; decoy pages, 404s, headers and redirects; rotation revokes old links; crash recovery (`kill -9`); hang recovery (watchdog); block and allow lists; clock-skew rejection; simple mode against a real cover site; the whole `burrow try` flow; `burrow deploy` end to end (upload, init on the "server", smoke from both ends, re-deploy keeps the secret). |
+| **unit/** (bats, 97 tests) | validators reject injection; `.env` parsing never executes code; secrets, links, rendering, permissions, inode-stable re-rendering, the CLI's argument handling. |
+| **tools/tests/** (pytest, 83 tests) | the FakeTLS/obfuscated2/MTProto client against a line-by-line port of mtg's server checks; a full Telegram round trip through a fake relay; probe verdicts and time budgets against hostile and quirky in-process servers (endless empty records, slow drips, resets, terminal-escape injection); QR output. |
+| **integration/** (28 tests) | the pinned **mtg binary** accepts every config variant; **Caddy** validates every Caddyfile; the compose model is hardened (caps, users, ports, digests); `install-host.sh` plans the right steps in a real Debian container (dry run). |
+| **e2e/** (26 tests) | full stacks: all smoke checks including **real Telegram resPQ round trips**; link testing from the host network; container hardening as actually run; decoy pages, 404s, headers and redirects; rotation revokes old links; crash recovery (`kill -9`); hang recovery (watchdog); block and allow lists; clock-skew rejection; simple mode against a real cover site; the whole `burrow try` flow; `burrow deploy` end to end (upload, init on the "server", smoke from both ends, re-deploy keeps the secret); the one-command installer for real (fetch, configure, start, smoke, share, then an in-place upgrade that keeps the secret). |
 | **smoke** (`burrow smoke`) | the same live checks, against your deployment, on demand or after every deploy. |
 
 CI runs every suite on each push and pull request, plus weekly to catch upstream changes
@@ -384,7 +425,7 @@ CI runs every suite on each push and pull request, plus weekly to catch upstream
 | See health and traffic | `./burrow status` |
 | Prometheus | scrape `http://127.0.0.1:3129/metrics` on the server (`mtg_*` metrics) |
 | Logs | `./burrow logs -f mtg` (rotated: 3 × 10 MB per container) |
-| Update burrow | `git pull && ./burrow up`, or re-run `burrow deploy` from your laptop |
+| Update burrow | re-run the install command, or `git pull && ./burrow up`, or re-run `burrow deploy` |
 | Update images only | `./burrow update` |
 | Change a setting | `./burrow config set KEY VALUE && ./burrow up` |
 | Revoke all links | `./burrow rotate` |
@@ -412,6 +453,7 @@ CI runs every suite on each push and pull request, plus weekly to catch upstream
 
 ```
 burrow                  the CLI (Bash)
+install.sh              one-command server installer (curl | sudo bash)
 lib/                    CLI modules: config, validation, rendering, secrets, links, compose
 compose.yaml            hardened stack: mtg, decoy-init, decoy (Caddy), tools
 compose.ipv6.yaml       overlay for ENABLE_IPV6=true

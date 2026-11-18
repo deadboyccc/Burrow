@@ -6,10 +6,21 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-## [1.0.1] - 2026-11-18
+## [1.1.0] - 2026-11-18
 
-A hardening release, from a full security audit of the code base. No new
-features. Upgrade with `git pull && ./burrow up` (or re-run `burrow deploy`).
+A one-command installer, plus a hardening pass from a full security audit of the
+code base. Upgrade by re-running the installer, or with `git pull && ./burrow up`, or by
+re-running `burrow deploy`. Your secret is kept either way.
+
+### Added
+
+- **`install.sh`: install on a server with one command**, configured through
+  environment variables:
+  `curl -fsSL https://raw.githubusercontent.com/deadboyccc/Burrow/main/install.sh | sudo BURROW_DOMAIN=notes.example.com bash`
+  (or `BURROW_COVER_DOMAIN=…` for simple mode). It installs prerequisites, fetches the
+  pinned release, prepares the host, creates the secret, starts the proxy, runs the
+  smoke test and prints the links and QR code. Re-running it upgrades in place and keeps
+  the secret. `BURROW_DRY_RUN=1` previews every step.
 
 ### Security
 
@@ -100,6 +111,6 @@ First release. Digby the mole digs his first tunnel.
   release workflow with checksums, and a GitHub Pages site starring Digby.
 - Documentation: an in-depth README and an A-Z deployment guide (`docs/DEPLOY.md`).
 
-[Unreleased]: https://github.com/deadboyccc/Burrow/compare/v1.0.1...HEAD
-[1.0.1]: https://github.com/deadboyccc/Burrow/compare/v1.0.0...v1.0.1
+[Unreleased]: https://github.com/deadboyccc/Burrow/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/deadboyccc/Burrow/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/deadboyccc/Burrow/releases/tag/v1.0.0

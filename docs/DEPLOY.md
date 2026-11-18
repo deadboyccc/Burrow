@@ -18,7 +18,7 @@ here, in order. Commands in `this style` are copy-paste ready. Replace the examp
 - [ ] A computer with a terminal (Linux, macOS, or Windows with WSL) and `ssh`.
 - [ ] Optional but recommended: Docker on that computer too, for the final check from *your* side.
 
-No domain at all? You can still deploy in **simple mode** (step F, variant 3). It is easier
+No domain at all? You can still deploy in **simple mode** (step F, "No domain?"). It is easier
 to detect, so get a domain when you can.
 
 ## B. Choose a server
@@ -85,7 +85,30 @@ Optional, but nice: try it locally first (needs Docker on your computer):
 
 ## F. Deploy
 
-### Variant 1: one command from your computer (recommended)
+### Variant 1: one command on the server (easiest)
+
+Log in to the server (`ssh root@203.0.113.7`) and run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/deadboyccc/Burrow/main/install.sh |
+  sudo BURROW_DOMAIN=notes.example.com BURROW_EMAIL=you@example.com bash
+```
+
+That's everything. It installs git/curl, fetches the pinned burrow release into
+`/opt/burrow`, prepares the host (Docker, firewall that keeps your SSH port open, BBR, NTP,
+security updates, watchdog), creates the secret, starts the proxy, runs the full smoke test
+and prints your share links and QR code. Re-run the same command later to upgrade (your
+secret is kept). Preview it first with `BURROW_DRY_RUN=1`. Every option is in the
+[README](../README.md#install-on-a-server-one-command); the common ones:
+
+| Variable | Example |
+|---|---|
+| `BURROW_COVER_DOMAIN` | `www.wikipedia.org`: simple mode, instead of `BURROW_DOMAIN` |
+| `BURROW_SSH_PORT` | `2222`, if your SSH port can't be detected |
+| `BURROW_PORT` | `443` (default) |
+| `BURROW_LINK_HOST` | `203.0.113.7`: links use the IP instead of the domain |
+
+### Variant 2: one command from your computer
 
 ```bash
 ./burrow deploy root@203.0.113.7 --domain notes.example.com --email you@example.com
@@ -107,7 +130,7 @@ Useful flags: `--ssh-port 2222`, `-i ~/.ssh/other_key`, `--dir /srv/burrow`,
 `--no-host-setup` (if you manage the server yourself), `--enable-ipv6`.
 Re-running `deploy` later upgrades burrow and **keeps** the existing secret.
 
-### Variant 2: by hand on the server
+### Variant 3: by hand on the server
 
 ```bash
 ssh root@203.0.113.7
@@ -119,10 +142,13 @@ sudo scripts/install-host.sh --dir /opt/burrow --ssh-port 22   # your SSH port; 
 ./burrow smoke
 ```
 
-### Variant 3: no domain (simple mode)
+### No domain? Simple mode
 
 ```bash
-./burrow deploy root@203.0.113.7 --mode simple --cover-domain www.example.org
+# on the server:
+curl -fsSL https://raw.githubusercontent.com/deadboyccc/Burrow/main/install.sh | sudo BURROW_COVER_DOMAIN=www.wikipedia.org bash
+# or from your computer:
+./burrow deploy root@203.0.113.7 --mode simple --cover-domain www.wikipedia.org
 ```
 
 `--cover-domain` must be a popular HTTPS site that **is reachable where your users are**
@@ -183,7 +209,7 @@ links) through a channel you trust. Anyone with the link can use your proxy.
 | Health and traffic | `./burrow status` |
 | Full self-test | `./burrow smoke` |
 | Logs | `./burrow logs -f mtg` / `./burrow logs decoy` |
-| Update burrow | from your computer: `git pull && ./burrow deploy root@203.0.113.7` |
+| Update burrow | re-run the step F command (Variant 1 or 2); the secret is kept |
 | Update container images | `./burrow update` |
 | Change settings | `./burrow config set KEY VALUE && ./burrow up` |
 | Back up | copy `/opt/burrow/.env` somewhere safe (it holds the secret) |

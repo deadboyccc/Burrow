@@ -112,12 +112,16 @@
       <img class="mascot" src="digby.svg" alt="Digby the mole, in aviator goggles, popping out of a burrow while a paper plane loops overhead">
     </div>
 
-    <pre><span class="c"># try it on your machine: nothing exposed, fully self-tested</span>
-git clone https://github.com/deadboyccc/Burrow.git burrow &amp;&amp; cd burrow
-./burrow try
+    <pre><span class="c"># on your server: one command does everything (Docker, firewall, TLS, watchdog, smoke test, QR code)</span>
+curl -fsSL https://raw.githubusercontent.com/deadboyccc/Burrow/main/install.sh |
+  sudo BURROW_DOMAIN=notes.example.com BURROW_EMAIL=you@example.com bash
 
-<span class="c"># put it on a server: Docker, firewall, TLS, watchdog, smoke tests, share link</span>
-./burrow deploy root@203.0.113.7 --domain notes.example.com --email you@example.com</pre>
+<span class="c"># no domain? impersonate a popular site your users can reach</span>
+curl -fsSL https://raw.githubusercontent.com/deadboyccc/Burrow/main/install.sh |
+  sudo BURROW_COVER_DOMAIN=www.wikipedia.org bash
+
+<span class="c"># or try it on your own machine first: nothing exposed, fully self-tested</span>
+git clone https://github.com/deadboyccc/Burrow.git burrow &amp;&amp; cd burrow &amp;&amp; ./burrow try</pre>
   </div>
 
   <section id="why">
@@ -130,7 +134,7 @@ git clone https://github.com/deadboyccc/Burrow.git burrow &amp;&amp; cd burrow
         <div class="card"><div class="icon">🔗</div><h3>Share with one link</h3><p>A <code>tg://</code> link and an offline QR code. <code>burrow rotate</code> revokes every link at once.</p></div>
         <div class="card"><div class="icon">🩺</div><h3>Self-healing</h3><p>Restart policies, Docker live-restore and a watchdog that probes the proxy every five minutes and recreates it if it hangs.</p></div>
         <div class="card"><div class="icon">⚡</div><h3>Fast</h3><p>mtg is a lean Go relay. BBR, fq and tuned buffers help on the lossy, long-distance links censored users live with.</p></div>
-        <div class="card"><div class="icon">🧪</div><h3>Tested for real</h3><p>182 automated tests, including live stacks that push real MTProto traffic to Telegram's data centres, and replay and probe attacks.</p></div>
+        <div class="card"><div class="icon">🧪</div><h3>Tested for real</h3><p>234 automated tests, including live stacks that push real MTProto traffic to Telegram's data centres, and replay and probe attacks.</p></div>
       </div>
     </div>
   </section>
@@ -158,8 +162,9 @@ git clone https://github.com/deadboyccc/Burrow.git burrow &amp;&amp; cd burrow
       <p class="sub">About 20 minutes from nothing to your phone using your own proxy. The <a href="https://github.com/deadboyccc/Burrow/blob/main/docs/DEPLOY.md">deployment guide</a> covers every step.</p>
       <div class="steps">
         <div class="step"><div><h3>Rent a small server, point a domain at it</h3><p>1 vCPU, 1 GB RAM, Debian or Ubuntu. Add an <code>A</code> record such as <code>notes.example.com</code> → your server's IP.</p></div></div>
-        <div class="step"><div><h3>Deploy with one command</h3><pre>./burrow deploy root@203.0.113.7 --domain notes.example.com --email you@example.com</pre></div></div>
-        <div class="step"><div><h3>Scan, connect, share</h3><pre>./burrow share     <span class="c"># QR code + links; ./burrow rotate revokes them all</span></pre></div></div>
+        <div class="step"><div><h3>Run one command on the server</h3><pre>curl -fsSL https://raw.githubusercontent.com/deadboyccc/Burrow/main/install.sh |
+  sudo BURROW_DOMAIN=notes.example.com bash</pre><p>Re-run it any time to upgrade; your secret is kept. Prefer your laptop? <code>./burrow deploy root@IP --domain …</code> does the same over SSH.</p></div></div>
+        <div class="step"><div><h3>Scan, connect, share</h3><p>The installer ends by printing your links and a QR code. Later: <code>/opt/burrow/burrow share</code> shows them again, and <code>/opt/burrow/burrow rotate</code> revokes them all.</p></div></div>
       </div>
     </div>
   </section>

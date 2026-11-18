@@ -105,9 +105,11 @@ tools_host() { # tools_host SECRET ARGS...
 	grep -qi '^server: Caddy' <<<"$headers"
 }
 
-@test "plain HTTP redirects to HTTPS without leaking the internal port" {
+@test "plain HTTP redirects to the public HTTPS port, never the internal one" {
 	run curl -s --max-time 10 -o /dev/null -w '%{http_code} %{redirect_url}' -H "Host: $DOMAIN" "http://127.0.0.1:$HTTP_PORT/about.html"
-	assert_output "301 https://$DOMAIN/about.html"
+	# The test stack's proxy port is not 443, so the redirect must carry it.
+	assert_output "301 https://$DOMAIN:$PROXY_PORT/about.html"
+	refute_output --partial ":8443"
 }
 
 @test "metrics count probes that were sent to the decoy" {

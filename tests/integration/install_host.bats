@@ -37,13 +37,35 @@ in_debian() {
 }
 
 @test "steps can be switched off, custom ports respected" {
-	run in_debian "$DEBIAN_IMAGE" bash /burrow/scripts/install-host.sh --dry-run \
+	run in_debian "$DEBIAN_IMAGE" bash /burrow/scripts/install-host.sh --dry-run --ssh-port 22 \
 		--no-docker --no-sysctl --no-upgrades --no-watchdog --ports 80,8443
 	assert_success
 	refute_output --partial "download.docker.com"
 	refute_output --partial "99-burrow.conf"
 	refute_output --partial "burrow-watchdog"
 	assert_output --partial "ufw allow 8443/tcp"
+}
+
+@test "SSH lockout guard: no known SSH port means no firewall" {
+	run in_debian "$DEBIAN_IMAGE" bash /burrow/scripts/install-host.sh --dry-run --no-docker
+	assert_success
+	assert_output --partial "NOT enabling the firewall"
+	refute_output --partial "ufw --force enable"
+}
+
+@test "SSH lockout guard: the session port and the explicit port are both allowed" {
+	run in_debian -e SSH_CONNECTION="198.51.100.9 50000 203.0.113.7 2200" "$DEBIAN_IMAGE" \
+		bash /burrow/scripts/install-host.sh --dry-run --no-docker --ssh-port 22
+	assert_output --partial "ufw limit 22/tcp"
+	assert_output --partial "ufw limit 2200/tcp"
+}
+
+@test "Docker daemon config is written before the packages start dockerd" {
+	run in_debian "$DEBIAN_IMAGE" bash /burrow/scripts/install-host.sh --dry-run --ssh-port 22
+	daemon=$(grep -n 'daemon.json' <<<"$output" | head -n1 | cut -d: -f1)
+	packages=$(grep -n 'docker-ce docker-ce-cli' <<<"$output" | cut -d: -f1)
+	((daemon < packages))
+	assert_output --partial "52burrow-docker-upgrades"
 }
 
 @test "refuses to run without root (outside --dry-run) and validates input" {
@@ -53,6 +75,8 @@ in_debian() {
 	run in_debian "$DEBIAN_IMAGE" bash /burrow/scripts/install-host.sh --dry-run --ssh-port abc
 	assert_failure
 	run in_debian "$DEBIAN_IMAGE" bash /burrow/scripts/install-host.sh --dry-run --ports '80;reboot'
+	assert_failure
+	run in_debian "$DEBIAN_IMAGE" bash /burrow/scripts/install-host.sh --dry-run --dir '/opt/a b|c'
 	assert_failure
 }
 

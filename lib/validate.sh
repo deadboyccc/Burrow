@@ -8,6 +8,9 @@ is_bool() { [[ $1 == true || $1 == false ]]; }
 
 is_uint() { [[ $1 =~ ^[0-9]+$ ]]; }
 
+# A positive integer without leading zeros (valid in TOML).
+is_count() { [[ $1 =~ ^[1-9][0-9]{0,8}$ ]]; }
+
 is_port() { [[ $1 =~ ^[0-9]{1,5}$ ]] && (($1 >= 1 && $1 <= 65535)); }
 
 # Lowercase LDH hostname with at least one dot (an FQDN). IDNs must be
@@ -34,13 +37,27 @@ is_ipv4() {
 	done
 }
 
-# Deliberately loose: hex groups and colons, optionally one "::", no zone id.
+# Eight 1-4 digit hex groups, or fewer around a single "::". No zone ids and
+# no embedded IPv4.
 is_ipv6() {
-	local ip=$1
-	[[ $ip == *:* && $ip =~ ^[0-9a-fA-F:]+$ && ${#ip} -le 39 ]] || return 1
-	[[ $ip != *:::* ]] || return 1
-	local rest=${ip/::/}
-	[[ $rest != *::* ]]
+	local ip=$1 head tail groups=() part group n=0
+	[[ $ip =~ ^[0-9a-fA-F:]+$ && ${#ip} -le 39 ]] || return 1
+	if [[ $ip == *::* ]]; then
+		head=${ip%%::*} tail=${ip#*::}
+		[[ $tail != *::* ]] || return 1
+	else
+		head=$ip tail=''
+	fi
+	for part in "$head" "$tail"; do
+		[[ -z $part ]] && continue
+		IFS=: read -ra groups <<<"$part"
+		[[ $part != :* && $part != *: ]] || return 1
+		for group in "${groups[@]}"; do
+			[[ $group =~ ^[0-9a-fA-F]{1,4}$ ]] || return 1
+			n=$((n + 1))
+		done
+	done
+	if [[ $ip == *::* ]]; then ((n <= 7)); else ((n == 8)); fi
 }
 
 is_ip() { is_ipv4 "$1" || is_ipv6 "$1"; }

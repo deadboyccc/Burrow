@@ -152,13 +152,14 @@ config_validate() {
 	_config_errors=()
 
 	_need BURROW_MODE is_mode "must be 'stealth' or 'simple'"
+	# Every value reaches compose.env, so every key is checked in every mode.
+	_need HTTP_PORT is_port "must be 1-65535 (port 80 is needed for Let's Encrypt HTTP-01)"
+	_need DECOY_IP is_ipv4 "must be an IPv4 address inside EDGE_SUBNET"
+	_need TLS_MODE is_tls_mode "must be 'acme' or 'internal'"
+	[[ -z $ACME_EMAIL ]] || _need ACME_EMAIL is_email "is not an email address"
+	[[ -z $ACME_CA ]] || _need ACME_CA is_https_url "must be an https:// ACME directory URL"
 	if [[ $BURROW_MODE == stealth ]]; then
 		_need DOMAIN is_hostname "stealth mode needs a domain you own, pointed at this server (lowercase FQDN)"
-		_need TLS_MODE is_tls_mode "must be 'acme' or 'internal'"
-		[[ -z $ACME_EMAIL ]] || _need ACME_EMAIL is_email "is not an email address"
-		[[ -z $ACME_CA ]] || _need ACME_CA is_https_url "must be an https:// ACME directory URL"
-		_need HTTP_PORT is_port "must be 1-65535 (port 80 is needed for Let's Encrypt HTTP-01)"
-		_need DECOY_IP is_ipv4 "must be an IPv4 address inside EDGE_SUBNET"
 	elif [[ $BURROW_MODE == simple ]]; then
 		_need COVER_DOMAIN is_hostname "simple mode needs a real HTTPS site to impersonate (lowercase FQDN)"
 		[[ -n $LINK_HOST ]] || _need PUBLIC_IPV4 is_ipv4 "simple mode needs the server's public IPv4 (or set LINK_HOST)"
@@ -183,11 +184,11 @@ config_validate() {
 	fi
 	_need ENABLE_IPV6 is_bool "must be true or false"
 	_need EDGE_SUBNET is_cidr4 "must be an IPv4 CIDR such as 10.203.47.0/28"
-	if [[ $BURROW_MODE == stealth ]] && is_ipv4 "$DECOY_IP" && is_cidr4 "$EDGE_SUBNET"; then
+	if is_ipv4 "$DECOY_IP" && is_cidr4 "$EDGE_SUBNET"; then
 		ip_in_subnet "$DECOY_IP" "$EDGE_SUBNET" ||
 			_config_errors+=("DECOY_IP=$DECOY_IP: must be a host address inside EDGE_SUBNET=$EDGE_SUBNET (not .0, .1 or broadcast)")
 	fi
-	[[ $ENABLE_IPV6 != true ]] || _need EDGE_SUBNET6 is_cidr6 "must be an IPv6 CIDR such as fd42:7572:726f:77::/64"
+	_need EDGE_SUBNET6 is_cidr6 "must be an IPv6 CIDR such as fd42:7572:726f:77::/64"
 
 	_need DNS_RESOLVER is_dns_uri "must be https://IP, tls://host, udp://IP or an IP"
 	_need PREFER_IP is_prefer_ip "must be prefer-ipv4, prefer-ipv6, only-ipv4 or only-ipv6"
@@ -209,7 +210,7 @@ config_validate() {
 		fi
 	done
 
-	_need CONCURRENCY is_uint "must be a positive integer"
+	_need CONCURRENCY is_count "must be a positive integer without leading zeros"
 	_need IDLE_TIMEOUT is_duration "must be a duration such as 5m"
 	_need MTG_MEMORY_LIMIT is_mem "must look like 512m or 1g"
 	_need DECOY_MEMORY_LIMIT is_mem "must look like 256m or 1g"
@@ -221,6 +222,17 @@ config_validate() {
 		for e in "${_config_errors[@]}"; do fail "$e"; done
 		return 1
 	fi
+}
+
+# socks5://user:pass@host:port -> socks5://***@host:port, for display.
+redact_userinfo() {
+	local items item out=()
+	read -ra items <<<"$1"
+	for item in "${items[@]}"; do
+		if [[ $item == *://*@* ]]; then item="${item%%://*}://***@${item##*@}"; fi
+		out+=("$item")
+	done
+	printf '%s\n' "${out[*]}"
 }
 
 # Replace (or append) one KEY=value line, preserving everything else.

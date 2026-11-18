@@ -133,3 +133,23 @@ setup() {
 		assert_failure
 	done
 }
+
+@test "ipv6: strict group structure" {
+	for ip in :: ::1 1:: 2001:db8:0:0:0:0:0:1 fe80::a:b:c:d; do
+		run is_ipv6 "$ip"
+		assert_success
+	done
+	for ip in : 1:2:3 1:2:3:4:5:6:7:8:9 :1:2:3:4:5:6:7 12345::1 1::2:3:4:5:6:7:8 ::ffff:1.2.3.4; do
+		run is_ipv6 "$ip"
+		assert_failure
+	done
+}
+
+@test "counts are positive and TOML-safe" {
+	run is_count 8192
+	assert_success
+	for v in 0 0123 -1 "" 1e3 99999999999; do
+		run is_count "$v"
+		assert_failure
+	done
+}

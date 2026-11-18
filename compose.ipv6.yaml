@@ -10,14 +10,14 @@ services:
       - name: proxy6
         target: 3128
         published: "${PROXY_PORT}"
-        host_ip: "::"
+        host_ip: "${BIND_ADDR6}"
         protocol: tcp
   decoy:
     ports:
       - name: http6
         target: 8080
         published: "${HTTP_PORT}"
-        host_ip: "::"
+        host_ip: "${BIND_ADDR6}"
         protocol: tcp
 
 networks:

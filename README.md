@@ -193,8 +193,9 @@ Prefer doing it by hand, or want every detail? → **[docs/DEPLOY.md](docs/DEPLO
   working immediately (old secrets now just reach the decoy website); send the new link to
   the people who should keep access.
 * **Per-person links?** mtg serves exactly one secret per instance, on purpose (simpler,
-  smaller attack surface). If you need individually revocable access, run several burrow
-  instances (separate directories, ports and `BURROW_PROJECT`s) or look at telemt.
+  smaller attack surface), and burrow runs one proxy per server. A second burrow checkout on
+  the same host is refused rather than allowed to take over the first one's containers. If
+  you need individually revocable access, look at telemt.
 * **Links point at your domain by default.** If your domain gets DNS-poisoned, set
   `LINK_HOST` to the server's IP: links keep working and the SNI still says your domain.
 * **Test any link, from anywhere:** `./burrow smoke --link 'tg://proxy?…'` checks a
@@ -219,7 +220,7 @@ Prefer doing it by hand, or want every detail? → **[docs/DEPLOY.md](docs/DEPLO
 | `logs [-f] [mtg\|decoy]` | Container logs. |
 | `restart`, `down [--volumes]`, `update` | Lifecycle. `update` pulls the pinned images and recreates. |
 | `watchdog` | One health check, restarting what's stuck (run by a systemd timer). |
-| `config show\|get K\|set K V …` | Inspect or change settings, validated (`show` hides the secret). |
+| `config show\|get K\|set K V …` | Inspect or change settings. All pairs are validated together before anything is written; changing `DOMAIN` (or the mode) regenerates the secret. `show` hides the secret and SOCKS passwords. |
 | `render` | Write `state/` without starting anything. |
 | `uninstall [--purge]` | Remove containers, volumes, state and the watchdog (`--purge`: also `.env`). |
 
@@ -287,7 +288,7 @@ on the template.
 | Abuse from known-bad networks | FireHOL/Spamhaus block lists, optional allow lists. |
 | Container breakout impact | Non-root, read-only rootfs, zero capabilities, `no-new-privileges`, memory and PID caps. |
 | Secret leakage | `.env` and share files are 0600; secrets reach probe containers via the environment, never argv; `config show` and logs redact them; QR codes are rendered offline. |
-| Supply-chain tampering | Images pinned by sha256 digest, Python deps installed with `--require-hashes`, test deps pinned by commit, CI actions pinned by SHA, Dependabot keeps all of it current. |
+| Supply-chain tampering | Images pinned by sha256 digest, Python deps installed with `--require-hashes`, test deps pinned by commit, CI actions pinned by SHA. Dependabot updates the images, the Python deps and the actions; the bats commits and the lint/scan images are bumped by hand. |
 | Config injection | `.env` is parsed as data (never `source`d), unknown keys are ignored, and every value is validated against a strict pattern before it reaches TOML, YAML or a Caddyfile. |
 
 ### What it does not do
@@ -303,9 +304,11 @@ on the template.
 
 ### Host hardening done by `scripts/install-host.sh`
 
-ufw (deny inbound except rate-limited SSH, 80 and 443), unattended security upgrades, NTP,
-Docker from Docker's signed apt repository with `live-restore`, and a hardened systemd unit
-for the watchdog. Docker publishes ports through its own iptables chain, before ufw sees them. burrow publishes
+ufw (deny inbound except rate-limited SSH, 80 and 443), unattended security upgrades
+(including Docker's own packages), NTP, Docker from Docker's signed apt repository with
+`live-restore`, and a hardened systemd unit for the watchdog. SSH stays reachable on
+`--ssh-port` *and* on every port sshd is configured for; if no SSH port can be determined,
+the firewall is left off rather than risking a lockout. Docker publishes ports through its own iptables chain, before ufw sees them. burrow publishes
 only the proxy and HTTP ports publicly; metrics are bound to 127.0.0.1.
 
 Found a vulnerability? See [SECURITY.md](SECURITY.md).
@@ -315,10 +318,12 @@ Found a vulnerability? See [SECURITY.md](SECURITY.md).
 ## 8. Reliability
 
 * **Self-checking start:** `burrow up` only reports success once a real FakeTLS handshake
-  succeeds (and, in stealth mode, the decoy serves HTTPS).
+  succeeds. In stealth mode it then checks that the decoy serves HTTPS, and warns (with the
+  likely cause) while the certificate is still being issued.
 * **Crash recovery:** `restart: unless-stopped` on every service (tested by `kill -9`).
 * **Hang recovery:** a systemd timer runs `burrow watchdog` every 5 minutes. If the proxy
-  stops answering handshakes (three tries), it is recreated (tested with `docker pause`).
+  stops answering handshakes (three tries), it is recreated (tested with `docker pause`). If
+  the probe itself can't run, the proxy is left alone instead of dropping every user.
 * **Daemon upgrades:** Docker `live-restore` keeps containers serving while `dockerd`
   restarts.
 * **Precise reconfiguration:** rendered files carry content hashes as container labels, so
@@ -384,7 +389,7 @@ CI runs every suite on each push and pull request, plus weekly to catch upstream
 | Change a setting | `./burrow config set KEY VALUE && ./burrow up` |
 | Revoke all links | `./burrow rotate` |
 | Back up | `.env` (the secret) and, optionally, the `burrow_decoy-data` volume (certificates) |
-| Move servers | copy `.env` to the new server, point DNS at it, `./burrow up`; links keep working |
+| Move servers | copy `.env` to the new server, `./burrow config set PUBLIC_IPV4 <new IP>`, point DNS at it, `./burrow up`; domain-based links keep working |
 | Remove | `./burrow uninstall --purge` |
 
 ---

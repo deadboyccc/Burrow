@@ -59,6 +59,12 @@ model() {
 	grep -q 'bind-to = "\[::\]:3128"' "$BURROW_STATE_DIR/mtg.toml"
 }
 
+@test "IPv6 overlay never exposes more than BIND_ADDR does" {
+	json=$(model ENABLE_IPV6 true BIND_ADDR 127.0.0.1)
+	run jq -r '[.services[].ports[]? | select(.name == "proxy6" or .name == "http6") | .host_ip] | unique | join(",")' <<<"$json"
+	assert_output "::1"
+}
+
 @test "LOGGING=off drops all container logs" {
 	run jq -r '.services.mtg.logging.driver + "," + .services.decoy.logging.driver' <<<"$(model LOGGING off)"
 	assert_output none,none

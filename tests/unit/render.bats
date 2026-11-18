@@ -157,3 +157,47 @@ setup() {
 	[[ " ${COMPOSE_ARGS[*]} " == *compose.ipv6.yaml* && " ${COMPOSE_ARGS[*]} " == *compose.nolog.yaml* ]]
 	[[ " ${COMPOSE_ARGS[*]} " != *"--profile stealth"* ]]
 }
+
+@test "Caddyfile: redirects keep a non-standard proxy port and dotfiles stay hidden" {
+	run render_caddyfile
+	assert_output --partial 'redir https://{host}{uri} permanent'
+	assert_output --partial 'hide .*'
+	PROXY_PORT=8443
+	run render_caddyfile
+	assert_output --partial 'redir https://{host}:8443{uri} permanent'
+}
+
+@test "compose.env: values are single-quoted; IPv6 binding follows BIND_ADDR" {
+	render_all
+	grep -qx "BIND_ADDR6='::'" "$STATE_DIR/compose.env"
+	grep -qx "BURROW_STATE_DIR='$STATE_DIR'" "$STATE_DIR/compose.env"
+	BIND_ADDR=127.0.0.1
+	render_all
+	grep -qx "BIND_ADDR6='::1'" "$STATE_DIR/compose.env"
+}
+
+@test "render_all: changed site content is synced into the same directory" {
+	export BURROW_ROOT=$BATS_TEST_TMPDIR/root
+	mkdir -p "$BURROW_ROOT/site.local"
+	printf 'one\n' >"$BURROW_ROOT/site.local/index.html"
+	render_all
+	inode=$(stat -c %i "$STATE_DIR/site")
+	printf 'two\n' >"$BURROW_ROOT/site.local/index.html"
+	render_all
+	[[ $(stat -c %i "$STATE_DIR/site") == "$inode" ]]
+	[[ $(<"$STATE_DIR/site/index.html") == two ]]
+	run find "$STATE_DIR" -maxdepth 1 -name 'site.new*'
+	assert_output ""
+}
+
+@test "render_all: dotfiles in site.local are never published" {
+	export BURROW_ROOT=$BATS_TEST_TMPDIR/root
+	mkdir -p "$BURROW_ROOT/site.local/.git" "$BURROW_ROOT/site.local/notes"
+	printf 'hi\n' >"$BURROW_ROOT/site.local/index.html"
+	printf '[user]\nemail = me@example.org\n' >"$BURROW_ROOT/site.local/.git/config"
+	: >"$BURROW_ROOT/site.local/notes/.DS_Store"
+	render_all
+	run find "$STATE_DIR/site" -name '.*'
+	assert_output ""
+	[[ -f $STATE_DIR/site/index.html ]]
+}

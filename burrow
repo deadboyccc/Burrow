@@ -3,6 +3,13 @@
 #
 # Copyright (c) 2026 burrow contributors. MIT License.
 
+# Checked before anything else, so old shells (macOS ships bash 3.2) get a
+# readable message instead of a failing `shopt`.
+if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
+	printf 'error: bash >= 4.4 is required (found %s). On macOS: brew install bash\n' "$BASH_VERSION" >&2
+	exit 1
+fi
+
 set -Eeuo pipefail
 shopt -s inherit_errexit
 
@@ -26,8 +33,22 @@ require_bash
 ENV_FILE=${BURROW_ENV_FILE:-$BURROW_ROOT/.env}
 STATE_DIR=${BURROW_STATE_DIR:-$BURROW_ROOT/state}
 BURROW_PROJECT=${BURROW_PROJECT:-burrow}
+# These paths end up quoted in compose.env and in systemd units.
+for _path in "$BURROW_ROOT" "$STATE_DIR" "$ENV_FILE"; do
+	[[ $_path != *[$'\n\r'\'\"]* ]] || die "unsupported characters (quotes or newlines) in path: $_path"
+done
+unset _path
+[[ $BURROW_PROJECT =~ ^[a-z0-9][a-z0-9_-]*$ ]] || die "BURROW_PROJECT must be lowercase letters, digits, - and _"
 
-trap 'say "${C_RED}burrow: unexpected failure at line $LINENO: $BASH_COMMAND${C_RESET}"' ERR
+# Expected failures go through die() with a clear message; this reports the
+# unexpected ones. A command's own non-zero exit status (the dispatch line in
+# main) is not an "unexpected failure".
+on_error() {
+	# shellcheck disable=SC2016 # matching the literal command text
+	[[ $3 == '"$fn" "$@"' ]] && return 0
+	say "${C_RED}burrow: '$3' failed (exit $1, line $2)${C_RESET}"
+}
+trap 'on_error $? $LINENO "$BASH_COMMAND"' ERR
 
 load_config() {
 	config_load "$ENV_FILE"
@@ -69,7 +90,7 @@ Usage: burrow init [options]
   --cover-domain NAME    simple mode: a real HTTPS site to impersonate
   --email ADDRESS        Let's Encrypt account email (optional)
   --ipv4 ADDRESS         public IPv4 (auto-detected if omitted)
-  --ipv6 ADDRESS         public IPv6, enables links over IPv6 with --enable-ipv6
+  --ipv6 ADDRESS         public IPv6 (informational: used by mtg doctor)
   --enable-ipv6          also listen on IPv6
   --link-host NAME|IP    what share links point at (default: domain or IPv4)
   --port N               public proxy port (default 443)
@@ -183,11 +204,24 @@ wait_ready() {
 	fi
 }
 
+# Compose identifies a stack by project name only. Starting a second burrow
+# (another directory) under the same name would silently take over the first
+# one's containers with a different secret.
+check_project_owner() {
+	local other
+	other=$(docker ps -a --filter "label=com.docker.compose.project=$BURROW_PROJECT" \
+		--format '{{.Label "com.docker.compose.project.working_dir"}}' 2>/dev/null |
+		sort -u | grep -vxF "$BURROW_ROOT" | head -n 1 || true)
+	[[ -z $other ]] || die "the Docker Compose project '$BURROW_PROJECT' belongs to another burrow in $other.
+       burrow runs one proxy per server: stop that one first (./burrow down there)."
+}
+
 cmd_up() {
 	local wait=1
 	[[ ${1-} == --no-wait ]] && wait=0
 	load_config
 	require_docker
+	check_project_owner
 	render_all
 	ensure_tools_image
 	info "starting burrow ($BURROW_MODE mode, project $BURROW_PROJECT)"
@@ -278,14 +312,17 @@ cmd_status() {
 		return 1
 	fi
 	info "health"
+	local healthy=1
 	if tools_in_stack probe --host mtg --port 3128 --timeout 5 >/dev/null; then
 		ok "FakeTLS handshake succeeds"
 	else
 		fail "FakeTLS handshake fails (see ./burrow logs mtg)"
+		healthy=0
 	fi
 	info "traffic since start"
 	metrics_summary
 	print_links
+	((healthy)) || return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -377,6 +414,8 @@ cmd_config() {
 		for key in "${CONFIG_KEYS[@]}"; do
 			if [[ $key == SECRET ]]; then
 				printf '%s=%s\n' "$key" "$(secret_redact "$SECRET")"
+			elif [[ $key == UPSTREAM_PROXIES ]]; then
+				printf '%s=%s\n' "$key" "$(redact_userinfo "$UPSTREAM_PROXIES")"
 			else
 				printf '%s=%s\n' "$key" "${!key}"
 			fi
@@ -390,19 +429,38 @@ cmd_config() {
 		;;
 	set)
 		(($# >= 2 && $# % 2 == 0)) || die "usage: burrow config set KEY VALUE [KEY VALUE ...]"
-		local backup
-		backup=$(<"$ENV_FILE")
-		while (($#)); do
-			config_is_known_key "$1" || die "unknown setting $1"
-			[[ $1 != SECRET ]] || die "use ./burrow rotate to change the secret"
-			[[ $2 != *$'\n'* && $2 != *\"* ]] || die "value must not contain newlines or double quotes"
-			config_set_value "$ENV_FILE" "$1" "$2"
-			shift 2
+		[[ -f $ENV_FILE ]] || die "no configuration at $ENV_FILE yet. Create one with: ./burrow init"
+		local pairs=("$@") i
+		# Check every pair before writing anything.
+		for ((i = 0; i < ${#pairs[@]}; i += 2)); do
+			config_is_known_key "${pairs[i]}" || die "unknown setting ${pairs[i]}"
+			[[ ${pairs[i]} != SECRET ]] || die "use ./burrow rotate to change the secret"
+			[[ ${pairs[i + 1]} != *[$'\n\r'\"\']* ]] || die "values must not contain newlines or quotes"
 		done
-		config_load "$ENV_FILE"
+		# Apply to a private draft; it replaces .env only if the result is valid.
+		local draft new_secret=0
+		draft=$(mktemp "$ENV_FILE.XXXXXX")
+		cat -- "$ENV_FILE" >"$draft"
+		for ((i = 0; i < ${#pairs[@]}; i += 2)); do
+			config_set_value "$draft" "${pairs[i]}" "${pairs[i + 1]}"
+		done
+		config_load "$draft"
+		# The secret embeds the fronting host. When DOMAIN, COVER_DOMAIN or
+		# BURROW_MODE changes it, the old secret can never be valid again.
+		if secret_is_valid "$SECRET" && is_hostname "$(config_front_host)" &&
+			[[ $(secret_host "$SECRET") != "$(config_front_host)" ]]; then
+			config_set_value "$draft" SECRET "$(secret_new "$(config_front_host)")"
+			config_load "$draft"
+			new_secret=1
+		fi
 		if ! config_validate; then
-			printf '%s\n' "$backup" | write_atomic "$ENV_FILE" 600
+			rm -f -- "$draft"
 			die "rejected; $ENV_FILE is unchanged"
+		fi
+		chmod 600 "$draft"
+		mv -f -- "$draft" "$ENV_FILE"
+		if ((new_secret)); then
+			warn "the fronting host changed, so the secret was regenerated: every shared link changes (./burrow link)"
 		fi
 		ok "updated. Apply with: ./burrow up"
 		;;
@@ -466,7 +524,7 @@ cmd_doctor() {
 		fi
 		if [[ $TLS_MODE == acme ]] && command -v getent >/dev/null 2>&1; then
 			local resolved
-			resolved=$(getent ahostsv4 "$DOMAIN" 2>/dev/null | awk '{print $1; exit}')
+			resolved=$(getent ahostsv4 "$DOMAIN" 2>/dev/null | awk '{print $1; exit}' || true)
 			if [[ -z $resolved ]]; then
 				fail "$DOMAIN does not resolve. Add an A record pointing to ${PUBLIC_IPV4:-this server}"
 				problems=$((problems + 1))
@@ -483,7 +541,8 @@ cmd_doctor() {
 
 	if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
 		info "mtg doctor (time drift, Telegram reachability, fronting, SNI/DNS)"
-		render_all
+		# Checks the config the running proxy uses. Never re-render here: that
+		# would swap files under the live containers.
 		if stack_running; then
 			if ! compose --progress quiet run --rm --no-deps -T --entrypoint /mtg mtg doctor /config.toml >&2; then
 				if [[ $TLS_MODE == internal ]]; then
@@ -532,7 +591,8 @@ parse_link() { # sets LINK_SERVER LINK_PORT LINK_SECRET
 		secret) LINK_SECRET=$value ;;
 		esac
 	done
-	[[ -n $LINK_SERVER && -n $LINK_PORT && -n $LINK_SECRET ]] || die "not a proxy link: $1"
+	[[ -n $LINK_SERVER && -n $LINK_PORT && -n $LINK_SECRET ]] ||
+		die "not a proxy link (expected tg://proxy?server=...&port=...&secret=...)"
 	is_port "$LINK_PORT" || die "bad port in link: $LINK_PORT"
 	{ is_hostname "$LINK_SERVER" || is_ip "$LINK_SERVER"; } || die "bad server in link: $LINK_SERVER"
 }
@@ -598,7 +658,7 @@ cmd_smoke() {
 		"$runner" probe --host "$host" --port "$port" --time-offset 600 --expect fronted
 	PROBE_SECRET=$wrong _smoke_check "wrong secret gets the cover website, not the proxy" \
 		"$runner" probe --host "$host" --port "$port" --expect fronted
-	if [[ -z $link && $BURROW_MODE == simple ]]; then
+	if [[ -n $link || $BURROW_MODE == simple ]]; then
 		_smoke_check "browsers and probes see $sni over real TLS" \
 			"$runner" https --host "$host" --port "$port" --sni "$sni" "${tls_args[@]}" --retries 3
 	else
@@ -624,24 +684,39 @@ cmd_smoke() {
 # watchdog (run by the systemd timer from scripts/install-host.sh)
 
 cmd_watchdog() {
+	if [[ ! -f $ENV_FILE ]]; then
+		say "burrow is not configured here yet; nothing to watch"
+		return 0
+	fi
 	load_config
 	require_docker
 	if [[ ! -f $STATE_DIR/compose.env || -z $(compose ps --all --quiet mtg 2>/dev/null) ]]; then
 		say "burrow is not deployed here (or was stopped with ./burrow down); nothing to watch"
 		return 0
 	fi
-	local timeout=${BURROW_WATCHDOG_TIMEOUT:-10}
-	if tools_in_stack probe --host mtg --port 3128 --retries 2 --retry-delay 5 --timeout "$timeout" >/dev/null 2>&1; then
-		say "burrow watchdog: proxy healthy"
-	else
+	ensure_tools_image || die "burrow watchdog: cannot build the probe image; leaving the proxy alone"
+
+	# Only a failed verdict (exit 1) means the proxy is unhealthy. Anything
+	# else is the probe itself failing, and restarting mtg would just drop
+	# every user for nothing.
+	local timeout=${BURROW_WATCHDOG_TIMEOUT:-10} rc=0
+	tools_in_stack probe --host mtg --port 3128 --retries 2 --retry-delay 5 --timeout "$timeout" >/dev/null 2>&1 || rc=$?
+	case $rc in
+	0) say "burrow watchdog: proxy healthy" ;;
+	1)
 		say "burrow watchdog: FakeTLS probe failed 3 times, restarting mtg"
-		command -v logger >/dev/null 2>&1 && logger -t burrow "watchdog restarted mtg"
+		if command -v logger >/dev/null 2>&1; then logger -t burrow "watchdog restarted mtg"; fi
 		compose up --detach --force-recreate --no-deps mtg
 		tools_in_stack probe --host mtg --port 3128 --retries 20 --retry-delay 1 >/dev/null 2>&1 ||
 			die "burrow watchdog: mtg is still unhealthy after a restart"
-	fi
+		;;
+	*) die "burrow watchdog: the probe itself failed (exit $rc); leaving the proxy alone" ;;
+	esac
+
 	if [[ $BURROW_MODE == stealth ]]; then
-		if ! tools_in_stack https --host mtg --port 3128 --sni "$DOMAIN" --insecure --retries 2 --retry-delay 5 >/dev/null 2>&1; then
+		rc=0
+		tools_in_stack https --host mtg --port 3128 --sni "$DOMAIN" --insecure --retries 2 --retry-delay 5 >/dev/null 2>&1 || rc=$?
+		if ((rc == 1)); then
 			say "burrow watchdog: decoy website unreachable, restarting it"
 			compose up --detach --force-recreate --no-deps decoy
 		fi
@@ -746,14 +821,19 @@ cmd_deploy() {
 		die "give a target like root@203.0.113.7"
 	}
 	is_port "$ssh_port" || die "bad --ssh-port"
+	is_port "$proxy_port" || die "bad --port"
+	is_port "$http_port" || die "bad --http-port"
 	is_abs_path "$dir" || die "--dir must be an absolute path"
 	need ssh
 	need tar
 
 	local control
 	control=$(mktemp -d "${TMPDIR:-/tmp}/burrow-ssh.XXXXXX")
-	# shellcheck disable=SC2064 # expand now: $control is local
-	trap "ssh -o ControlPath='$control/cm' -O exit '$target' >/dev/null 2>&1 || true; rm -rf -- '$control'" EXIT
+	local cleanup
+	printf -v cleanup 'ssh -o ControlPath=%q -O exit %q >/dev/null 2>&1 || true; rm -rf -- %q' \
+		"$control/cm" "$target" "$control"
+	# shellcheck disable=SC2064 # expand now: the values are local and %q-quoted
+	trap "$cleanup" EXIT
 	local ssh_opts=(-p "$ssh_port" -o ControlMaster=auto -o "ControlPath=$control/cm" -o ControlPersist=300
 		-o ServerAliveInterval=15 -o ConnectTimeout=15)
 	[[ -n $identity ]] && ssh_opts+=(-i "$identity")
@@ -765,32 +845,57 @@ cmd_deploy() {
 	info "connecting to $target"
 	local uid sudo=''
 	uid=$(rsh id -u) || die "cannot SSH to $target"
-	[[ $uid == 0 ]] || sudo='sudo'
+	if [[ $uid != 0 ]]; then
+		# Remote steps run without a terminal, so sudo must not prompt.
+		sudo='sudo -n'
+		rsh 'sudo -n true' >/dev/null 2>&1 ||
+			die "$target: log in as root, or give this user passwordless sudo (deploy runs remote commands non-interactively)"
+	fi
 	local qdir
 	qdir=$(printf '%q' "$dir")
 
 	info "uploading burrow to $target:$dir"
 	local files=()
 	mapfile -t files < <(project_files)
-	COPYFILE_DISABLE=1 tar -czf - -C "$BURROW_ROOT" --exclude '__pycache__' --exclude '*.pyc' "${files[@]}" |
-		rsh "$sudo mkdir -p $qdir && $sudo tar -xzf - -C $qdir --no-same-owner && $sudo chmod 0755 $qdir"
+	# No dotfiles from site.local/ (.git, .DS_Store, editor swap files) and no
+	# macOS extended attributes.
+	COPYFILE_DISABLE=1 tar -czf - -C "$BURROW_ROOT" --no-xattrs --exclude '__pycache__' --exclude '*.pyc' \
+		--exclude 'site.local/.*' --exclude 'site.local/*/.*' "${files[@]}" |
+		rsh "$sudo mkdir -p $qdir && $sudo tar -xzf - -C $qdir --no-same-owner && $sudo chmod 0755 $qdir" ||
+		die "uploading to $target:$dir failed"
+
+	# Firewall ports: from the server's .env on re-deploys, else from the flags.
+	local has_env=0 mode=stealth
+	if rsh "$sudo test -f $qdir/.env"; then
+		has_env=1
+		mode=$(rsh "$sudo $qdir/burrow config get BURROW_MODE")
+		proxy_port=$(rsh "$sudo $qdir/burrow config get PROXY_PORT")
+		http_port=$(rsh "$sudo $qdir/burrow config get HTTP_PORT")
+	elif [[ " ${init_args[*]} " == *" --mode simple "* ||
+		(" ${init_args[*]} " == *" --cover-domain "* && " ${init_args[*]} " != *" --domain "*) ]]; then
+		mode=simple
+	fi
+	local ports=$proxy_port
+	[[ $mode == simple ]] || ports=$http_port,$proxy_port
 
 	if ((host_setup)); then
 		info "preparing the host (Docker, firewall, kernel tuning, time sync, watchdog)"
-		rsh_tty "$sudo $qdir/scripts/install-host.sh --dir $qdir --ssh-port $ssh_port --ports $http_port,$proxy_port"
+		rsh_tty "$sudo $qdir/scripts/install-host.sh --dir $qdir --ssh-port $(printf '%q' "$ssh_port") --ports $(printf '%q' "$ports")" ||
+			die "host preparation failed on $target (output above)"
 	fi
 
-	if rsh "$sudo test -f $qdir/.env"; then
+	if ((has_env)); then
 		info "keeping the existing configuration and secret on the server"
 	else
 		info "initialising (the secret is generated on the server and never leaves it except in links)"
-		rsh "$sudo $qdir/burrow init $(printf '%q ' "${init_args[@]}")"
+		rsh "$sudo $qdir/burrow init $(printf '%q ' "${init_args[@]}")" || die "burrow init failed on $target (output above)"
 	fi
-	rsh "$sudo $qdir/burrow up"
-	rsh "$sudo $qdir/burrow smoke"
+	rsh "$sudo $qdir/burrow up" || die "the proxy did not start on $target (output above)"
+	rsh "$sudo $qdir/burrow smoke" || die "the proxy runs on $target but failed its smoke test (output above)"
 
 	local link
-	link=$(rsh "$sudo $qdir/burrow link --format tg")
+	link=$(rsh "$sudo $qdir/burrow link --format tg") || true
+	[[ $link == tg://proxy\?* ]] || die "could not read the share link from $target"
 	if ((local_smoke)) && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
 		info "testing from this machine, across the internet"
 		local smoke_args=(--link "$link")
@@ -881,7 +986,8 @@ main() {
 		die "unknown command: $cmd"
 		;;
 	esac
-	"$fn" "$@" || exit $?
+	# Not `"$fn" "$@" || exit`: that would switch off errexit inside every command.
+	"$fn" "$@"
 }
 
 main "$@"

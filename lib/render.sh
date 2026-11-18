@@ -104,6 +104,8 @@ render_caddyfile() {
 	[[ $TLS_MODE == internal ]] && globals+=$'\tskip_install_trust\n'
 	local tls_line=''
 	[[ $TLS_MODE == internal ]] && tls_line=$'\ttls internal\n'
+	local redirect_port=''
+	[[ $PROXY_PORT == 443 ]] || redirect_port=":$PROXY_PORT"
 
 	cat <<EOF
 # Rendered by burrow from .env. Do not edit: change .env, then ./burrow up
@@ -135,7 +137,10 @@ ${tls_line}	root * /srv
 		Referrer-Policy "strict-origin-when-cross-origin"
 		Content-Security-Policy "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 	}
-	file_server
+	# Never serve dotfiles, even if one slips into site.local/.
+	file_server {
+		hide .*
+	}
 	handle_errors 404 {
 		rewrite * /404.html
 		file_server {
@@ -145,7 +150,7 @@ ${tls_line}	root * /srv
 }
 
 http://$DOMAIN {
-	redir https://{host}{uri} permanent
+	redir https://{host}$redirect_port{uri} permanent
 }
 
 # Container-local health endpoint for the Docker healthcheck. Not published.
@@ -181,15 +186,17 @@ site_source_dir() {
 }
 
 render_site() {
-	local dest=$1 src name accent year file content
+	local dest=$1 src name accent year file content new
 	src=$(site_source_dir)
 	name=$(site_name "$DOMAIN")
 	accent=$(site_accent "$DOMAIN")
 	year=$(date -u +%Y)
 
-	rm -rf "$dest.new"
-	mkdir -p "$dest.new"
-	cp -R "$src/." "$dest.new/"
+	new=$(mktemp -d "$dest.new.XXXXXX")
+	cp -R "$src/." "$new/"
+	# Dotfiles (.git, .DS_Store, editor swap files) would leak data and give
+	# probes a fingerprint.
+	find "$new" -mindepth 1 -name '.*' -prune -exec rm -rf -- {} +
 	while IFS= read -r -d '' file; do
 		content=$(<"$file")
 		content=${content//"{{SITE_NAME}}"/"$name"}
@@ -197,17 +204,20 @@ render_site() {
 		content=${content//"{{YEAR}}"/"$year"}
 		content=${content//"{{ACCENT}}"/"$accent"}
 		printf '%s\n' "$content" >"$file"
-	done < <(find "$dest.new" -type f \( -name '*.html' -o -name '*.css' -o -name '*.txt' -o -name '*.xml' -o -name '*.svg' -o -name '*.webmanifest' \) -print0)
-	find "$dest.new" -type d -exec chmod 0755 {} +
-	find "$dest.new" -type f -exec chmod 0644 {} +
-	# Swap only on change: the decoy bind-mounts this directory, and its
-	# config-hash label (which changes with the content) is what makes
-	# compose recreate it onto the new directory.
-	if [[ -d $dest && $(cd "$dest" && hash_paths .) == $(cd "$dest.new" && hash_paths .) ]]; then
-		rm -rf -- "$dest.new"
+	done < <(find "$new" -type f \( -name '*.html' -o -name '*.css' -o -name '*.txt' -o -name '*.xml' -o -name '*.svg' -o -name '*.webmanifest' \) -print0)
+	find "$new" -type d -exec chmod 0755 {} +
+	find "$new" -type f -exec chmod 0644 {} +
+
+	if [[ ! -d $dest ]]; then
+		mv "$new" "$dest"
+	elif [[ $(cd "$dest" && hash_paths .) == $(cd "$new" && hash_paths .) ]]; then
+		rm -rf -- "$new"
 	else
-		rm -rf -- "$dest"
-		mv "$dest.new" "$dest"
+		# Replace the contents, not the directory: a running decoy has the
+		# directory itself bind-mounted and must keep seeing it.
+		find "$dest" -mindepth 1 -delete
+		cp -R "$new/." "$dest/"
+		rm -rf -- "$new"
 	fi
 }
 
@@ -220,21 +230,28 @@ render_lists() {
 }
 
 render_compose_env() {
+	# IPv6 listeners follow BIND_ADDR: all interfaces only if IPv4 is on all
+	# interfaces too, otherwise loopback.
+	local bind6='::1'
+	[[ $BIND_ADDR == 0.0.0.0 ]] && bind6='::'
+	# Single quotes: compose reads these literally (no $ interpolation, no #
+	# comments), so unusual characters in the install path stay intact.
 	cat <<EOF
 # Rendered by burrow. Variables for docker compose interpolation only.
-BURROW_VERSION=$BURROW_VERSION
-BURROW_STATE_DIR=$STATE_DIR
-BIND_ADDR=$BIND_ADDR
-PROXY_PORT=$PROXY_PORT
-HTTP_PORT=$HTTP_PORT
-METRICS_PORT=$METRICS_PORT
-EDGE_SUBNET=$EDGE_SUBNET
-EDGE_SUBNET6=$EDGE_SUBNET6
-DECOY_IP=$DECOY_IP
-MTG_MEMORY_LIMIT=$MTG_MEMORY_LIMIT
-DECOY_MEMORY_LIMIT=$DECOY_MEMORY_LIMIT
-MTG_CONFIG_HASH=$1
-DECOY_CONFIG_HASH=$2
+BURROW_VERSION='$BURROW_VERSION'
+BURROW_STATE_DIR='$STATE_DIR'
+BIND_ADDR='$BIND_ADDR'
+BIND_ADDR6='$bind6'
+PROXY_PORT='$PROXY_PORT'
+HTTP_PORT='$HTTP_PORT'
+METRICS_PORT='$METRICS_PORT'
+EDGE_SUBNET='$EDGE_SUBNET'
+EDGE_SUBNET6='$EDGE_SUBNET6'
+DECOY_IP='$DECOY_IP'
+MTG_MEMORY_LIMIT='$MTG_MEMORY_LIMIT'
+DECOY_MEMORY_LIMIT='$DECOY_MEMORY_LIMIT'
+MTG_CONFIG_HASH='$1'
+DECOY_CONFIG_HASH='$2'
 EOF
 }
 

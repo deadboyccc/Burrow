@@ -195,3 +195,22 @@ write_env() { printf '%s\n' "$@" >"$ENV_FILE"; }
 		}
 	done
 }
+
+@test "validate: every key is checked in simple mode too" {
+	config_reset
+	BURROW_MODE=simple COVER_DOMAIN=www.example.com PUBLIC_IPV4=198.51.100.2
+	config_set_defaults
+	SECRET=$(secret_new www.example.com)
+	HTTP_PORT=0 DECOY_IP=nope EDGE_SUBNET6=bad CONCURRENCY=0123
+	run config_validate
+	assert_failure
+	assert_output --partial HTTP_PORT
+	assert_output --partial DECOY_IP
+	assert_output --partial EDGE_SUBNET6
+	assert_output --partial CONCURRENCY
+}
+
+@test "redact_userinfo hides SOCKS credentials" {
+	run redact_userinfo "socks5://user:pa55@10.0.0.2:1080 socks5://10.0.0.3:1080"
+	assert_output "socks5://***@10.0.0.2:1080 socks5://10.0.0.3:1080"
+}

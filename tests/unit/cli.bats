@@ -87,6 +87,86 @@ init_stealth() {
 	assert_output --partial "SECRET=${secret:0:6}…"
 }
 
+@test "config set checks every pair before writing anything" {
+	init_stealth
+	before=$(<"$BURROW_ENV_FILE")
+	run burrow config set PROXY_PORT 8443 NOT_A_KEY 1
+	assert_failure
+	[[ $(<"$BURROW_ENV_FILE") == "$before" ]]
+	run burrow config set ACME_EMAIL "a'b@example.org"
+	assert_failure
+	[[ $(<"$BURROW_ENV_FILE") == "$before" ]]
+	run ls -A "$(dirname "$BURROW_ENV_FILE")"
+	refute_output --partial ".env."
+}
+
+@test "config set DOMAIN regenerates the secret instead of getting stuck" {
+	init_stealth
+	old=$(burrow config get SECRET)
+	run burrow config set DOMAIN blog.example.net
+	assert_success
+	assert_output --partial "secret was regenerated"
+	new=$(burrow config get SECRET)
+	[[ $new != "$old" && $new == *"$(printf '%s' blog.example.net | od -An -tx1 -v | tr -d ' \n')" ]]
+	[[ $(stat -c %a "$BURROW_ENV_FILE") == 600 ]]
+}
+
+@test "config set without a .env explains instead of creating one" {
+	run burrow config set PROXY_PORT 8443
+	assert_failure
+	assert_output --partial "burrow init"
+	[[ ! -e $BURROW_ENV_FILE ]]
+}
+
+@test "config show redacts SOCKS credentials" {
+	init_stealth
+	burrow config set UPSTREAM_PROXIES "socks5://alice:hunter2@10.0.0.2:1080" >/dev/null
+	run burrow config show
+	refute_output --partial hunter2
+	assert_output --partial "UPSTREAM_PROXIES=socks5://***@10.0.0.2:1080"
+}
+
+@test "failures are failures: init into an unwritable place exits non-zero" {
+	mkdir -p "$BATS_TEST_TMPDIR/ro"
+	chmod 0500 "$BATS_TEST_TMPDIR/ro"
+	if ((EUID == 0)); then skip "root can write anywhere"; fi
+	BURROW_ENV_FILE=$BATS_TEST_TMPDIR/ro/.env run burrow init --domain notes.example.org --ipv4 203.0.113.7 --quiet
+	assert_failure
+	refute_output --partial "wrote"
+}
+
+@test "failures are failures: down exits non-zero when Docker fails" {
+	init_stealth
+	mkdir -p "$BATS_TEST_TMPDIR/bin"
+	printf '#!/bin/sh\necho "docker: broken" >&2\nexit 1\n' >"$BATS_TEST_TMPDIR/bin/docker"
+	chmod +x "$BATS_TEST_TMPDIR/bin/docker"
+	PATH=$BATS_TEST_TMPDIR/bin:$PATH run burrow down
+	assert_failure
+	refute_output --partial "stopped"
+}
+
+@test "failures are failures: deploy stops when the server cannot start the proxy" {
+	mkdir -p "$BATS_TEST_TMPDIR/bin"
+	ln -s "$BURROW_ROOT/tests/e2e/fake-ssh" "$BATS_TEST_TMPDIR/bin/ssh"
+	printf '#!/bin/sh\necho "docker: broken" >&2\nexit 1\n' >"$BATS_TEST_TMPDIR/bin/docker"
+	chmod +x "$BATS_TEST_TMPDIR/bin/docker"
+	if ((EUID != 0)) && ! sudo -n true 2>/dev/null; then skip "needs root or passwordless sudo"; fi
+	unset BURROW_ENV_FILE BURROW_STATE_DIR
+	PATH=$BATS_TEST_TMPDIR/bin:$PATH run burrow deploy root@server.test --dir "$BATS_TEST_TMPDIR/srv/burrow" \
+		--no-host-setup --no-local-smoke --domain notes.example.org --ipv4 203.0.113.7
+	assert_failure
+	assert_output --partial "did not start"
+	refute_output --partial "Deployed."
+	if ((EUID != 0)); then sudo -n rm -rf -- "$BATS_TEST_TMPDIR/srv"; fi
+}
+
+@test "link errors never echo the secret" {
+	require_docker
+	run burrow smoke --link "tg://proxy?server=bad_host!&port=443&secret=ee0011223344556677889900aabbccddeeff"
+	assert_failure
+	refute_output --partial "ee0011223344556677889900"
+}
+
 @test "config set validates, and rolls back on error" {
 	init_stealth
 	run burrow config set PROXY_PORT 8443 ACME_EMAIL ops@example.org

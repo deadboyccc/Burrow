@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-labelledby="digby-title digby-desc">
+  <title id="digby-title">Digby, the burrow mole</title>
+  <desc id="digby-desc">A round little mole wearing aviator goggles pops out of its burrow while a paper plane loops overhead.</desc>
+  <defs>
+    <radialGradient id="fur" cx="45%" cy="35%" r="75%">
+      <stop offset="0" stop-color="#7a6459"/>
+      <stop offset="1" stop-color="#4e3d36"/>
+    </radialGradient>
+    <linearGradient id="soil" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a06a44"/>
+      <stop offset="1" stop-color="#7a4b2e"/>
+    </linearGradient>
+    <clipPath id="head">
+      <path d="M66 216 C 58 150, 82 92, 128 90 C 174 92, 198 150, 190 216 Z"/>
+    </clipPath>
+    <radialGradient id="lens" cx="35%" cy="35%" r="70%">
+      <stop offset="0" stop-color="#e6f6ff"/>
+      <stop offset="1" stop-color="#8fd0f5"/>
+    </radialGradient>
+  </defs>
+
+  <!-- flight path of the paper plane -->
+  <path d="M150 74 C 150 34, 196 22, 206 50" fill="none" stroke="#8ec5ea" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="2 9"/>
+
+  <!-- paper plane -->
+  <g transform="translate(200 30) rotate(18)">
+    <path d="M0 22 L44 0 L30 40 L20 28 Z" fill="#ffffff" stroke="#2f7fc1" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M44 0 L20 28 L18 40 L26 31" fill="#dceefb" stroke="#2f7fc1" stroke-width="3" stroke-linejoin="round"/>
+  </g>
+
+  <!-- soil mound -->
+  <ellipse cx="128" cy="226" rx="108" ry="24" fill="url(#soil)"/>
+  <path d="M34 220 Q50 204 70 212 Q84 198 100 208" fill="none" stroke="#b98058" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="200" cy="214" r="5" fill="#b98058"/>
+  <circle cx="214" cy="224" r="3.5" fill="#b98058"/>
+  <ellipse cx="128" cy="214" rx="68" ry="14" fill="#3a2418"/>
+
+  <!-- body -->
+  <path d="M66 216 C 58 150, 82 92, 128 90 C 174 92, 198 150, 190 216 Z" fill="url(#fur)"/>
+  <path d="M112 92 Q118 76 126 90 Q130 74 140 92" fill="none" stroke="#4e3d36" stroke-width="5" stroke-linecap="round"/>
+
+  <!-- goggles pushed up on the forehead -->
+  <path d="M60 122 Q128 86 196 122" fill="none" stroke="#c9813f" stroke-width="9" clip-path="url(#head)"/>
+  <circle cx="106" cy="104" r="17" fill="url(#lens)" stroke="#e0a15c" stroke-width="6"/>
+  <circle cx="150" cy="104" r="17" fill="url(#lens)" stroke="#e0a15c" stroke-width="6"/>
+  <path d="M122 104 Q128 99 134 104" fill="none" stroke="#e0a15c" stroke-width="5" stroke-linecap="round"/>
+  <path d="M98 98 Q102 93 108 93" fill="none" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M142 98 Q146 93 152 93" fill="none" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round"/>
+
+  <!-- face -->
+  <ellipse cx="128" cy="156" rx="40" ry="30" fill="#d8b49d"/>
+  <circle cx="104" cy="134" r="6.5" fill="#1d1b26"/>
+  <circle cx="152" cy="134" r="6.5" fill="#1d1b26"/>
+  <circle cx="102" cy="131.5" r="2.2" fill="#ffffff"/>
+  <circle cx="150" cy="131.5" r="2.2" fill="#ffffff"/>
+  <ellipse cx="90" cy="156" rx="10" ry="6" fill="#f4a3bd" opacity="0.75"/>
+  <ellipse cx="166" cy="156" rx="10" ry="6" fill="#f4a3bd" opacity="0.75"/>
+  <ellipse cx="128" cy="146" rx="13" ry="9.5" fill="#f28daf"/>
+  <ellipse cx="124" cy="143" rx="4" ry="2.5" fill="#ffffff" opacity="0.8"/>
+  <path d="M119 162 Q123.5 167 128 162 Q132.5 167 137 162" fill="none" stroke="#5a3a30" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <g stroke="#8a6a5a" stroke-width="2.2" stroke-linecap="round">
+    <path d="M100 160 L80 156"/>
+    <path d="M100 166 L82 168"/>
+    <path d="M156 160 L176 156"/>
+    <path d="M156 166 L174 168"/>
+  </g>
+
+  <!-- paws on the edge of the burrow -->
+  <g fill="#f2b7a8" stroke="#c98778" stroke-width="2">
+    <ellipse cx="96" cy="206" rx="17" ry="11"/>
+    <ellipse cx="160" cy="206" rx="17" ry="11"/>
+  </g>
+  <g stroke="#c98778" stroke-width="2" stroke-linecap="round">
+    <path d="M88 210 L86 215"/>
+    <path d="M96 211 L96 216"/>
+    <path d="M104 210 L106 215"/>
+    <path d="M152 210 L150 215"/>
+    <path d="M160 211 L160 216"/>
+    <path d="M168 210 L170 215"/>
+  </g>
+</svg>

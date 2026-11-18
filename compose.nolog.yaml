@@ -1,0 +1,9 @@
+# Overlay applied by ./burrow when LOGGING=off: no container logs at all.
+# mtg logs client IP addresses at info level; this keeps none of them.
+services:
+  mtg:
+    logging: !override
+      driver: none
+  decoy:
+    logging: !override
+      driver: none

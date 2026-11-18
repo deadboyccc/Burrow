@@ -1,0 +1,887 @@
+#!/usr/bin/env bash
+# burrow: your own stealthy, shareable Telegram proxy.  ./burrow help
+#
+# Copyright (c) 2026 burrow contributors. MIT License.
+
+set -Eeuo pipefail
+shopt -s inherit_errexit
+
+BURROW_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+# shellcheck source=lib/common.sh
+source "$BURROW_ROOT/lib/common.sh"
+# shellcheck source=lib/validate.sh
+source "$BURROW_ROOT/lib/validate.sh"
+# shellcheck source=lib/secret.sh
+source "$BURROW_ROOT/lib/secret.sh"
+# shellcheck source=lib/links.sh
+source "$BURROW_ROOT/lib/links.sh"
+# shellcheck source=lib/config.sh
+source "$BURROW_ROOT/lib/config.sh"
+# shellcheck source=lib/render.sh
+source "$BURROW_ROOT/lib/render.sh"
+# shellcheck source=lib/compose.sh
+source "$BURROW_ROOT/lib/compose.sh"
+require_bash
+
+ENV_FILE=${BURROW_ENV_FILE:-$BURROW_ROOT/.env}
+STATE_DIR=${BURROW_STATE_DIR:-$BURROW_ROOT/state}
+BURROW_PROJECT=${BURROW_PROJECT:-burrow}
+
+trap 'say "${C_RED}burrow: unexpected failure at line $LINENO: $BASH_COMMAND${C_RESET}"' ERR
+
+load_config() {
+	config_load "$ENV_FILE"
+	config_validate || die "fix the settings above in $ENV_FILE"
+}
+
+detect_public_ipv4() {
+	command -v curl >/dev/null 2>&1 || return 1
+	local url ip
+	for url in https://api.ipify.org https://ipv4.icanhazip.com; do
+		ip=$(curl -4 -fsS --max-time 5 "$url" 2>/dev/null | tr -d '[:space:]') || continue
+		is_ipv4 "$ip" && {
+			printf '%s\n' "$ip"
+			return 0
+		}
+	done
+	return 1
+}
+
+print_links() {
+	local host
+	host=$(config_link_host)
+	say ""
+	say "${C_BOLD}Share your proxy${C_RESET} (anyone with this link can use it):"
+	say "  ${C_DIM}app link${C_RESET}   $(link_tg "$host" "$PROXY_PORT" "$SECRET")"
+	say "  ${C_DIM}web link${C_RESET}   $(link_tme "$host" "$PROXY_PORT" "$SECRET")"
+	say ""
+}
+
+# ---------------------------------------------------------------------------
+# init
+
+usage_init() {
+	cat >&2 <<'EOF'
+Usage: burrow init [options]
+
+  --domain NAME          stealth mode: a domain whose A record points here
+  --mode stealth|simple  default: stealth (simple if only --cover-domain is given)
+  --cover-domain NAME    simple mode: a real HTTPS site to impersonate
+  --email ADDRESS        Let's Encrypt account email (optional)
+  --ipv4 ADDRESS         public IPv4 (auto-detected if omitted)
+  --ipv6 ADDRESS         public IPv6, enables links over IPv6 with --enable-ipv6
+  --enable-ipv6          also listen on IPv6
+  --link-host NAME|IP    what share links point at (default: domain or IPv4)
+  --port N               public proxy port (default 443)
+  --http-port N          public HTTP port for ACME (default 80)
+  --bind ADDRESS         listen address (default 0.0.0.0)
+  --tls acme|internal    certificate source (internal = self-signed, for tests)
+  --acme-ca URL          ACME directory (e.g. Let's Encrypt staging)
+  --no-blocklist         don't download public IP blocklists
+  --metrics-port N       loopback-only Prometheus port (default 3129)
+  --subnet CIDR          internal Docker subnet (default 10.203.47.0/28)
+  --force                overwrite an existing .env (new secret, old links die)
+EOF
+}
+
+cmd_init() {
+	local force=0 quiet=0
+	config_reset
+	while (($#)); do
+		case $1 in
+		--domain) DOMAIN=${2,,} && shift ;;
+		--mode) BURROW_MODE=$2 && shift ;;
+		--cover-domain) COVER_DOMAIN=${2,,} && shift ;;
+		--email) ACME_EMAIL=$2 && shift ;;
+		--ipv4) PUBLIC_IPV4=$2 && shift ;;
+		--ipv6) PUBLIC_IPV6=$2 && shift ;;
+		--enable-ipv6) ENABLE_IPV6=true ;;
+		--link-host) LINK_HOST=${2,,} && shift ;;
+		--port) PROXY_PORT=$2 && shift ;;
+		--http-port) HTTP_PORT=$2 && shift ;;
+		--bind) BIND_ADDR=$2 && shift ;;
+		--tls) TLS_MODE=$2 && shift ;;
+		--acme-ca) ACME_CA=$2 && shift ;;
+		--no-blocklist) BLOCKLIST_ENABLED=false ;;
+		--metrics-port) METRICS_PORT=$2 && shift ;;
+		--subnet)
+			is_cidr4 "$2" || die "--subnet must be an IPv4 CIDR such as 10.203.47.0/28"
+			EDGE_SUBNET=$2 DECOY_IP=$(subnet_host "$2" 10) && shift
+			;;
+		--force) force=1 ;;
+		--quiet) quiet=1 ;;
+		-h | --help) usage_init && return 0 ;;
+		*) usage_init && die "unknown option: $1" ;;
+		esac
+		shift
+	done
+
+	if [[ -e $ENV_FILE && $force == 0 ]]; then
+		die "$ENV_FILE already exists. Re-run with --force to replace it (this generates a new secret and every shared link stops working)."
+	fi
+	if [[ -z ${BURROW_MODE-} && -z ${DOMAIN-} && -n ${COVER_DOMAIN-} ]]; then
+		BURROW_MODE=simple
+	fi
+	config_set_defaults
+
+	if [[ $BURROW_MODE == stealth && -z $DOMAIN ]]; then
+		die "stealth mode needs --domain: a domain you own whose A record points at this server.
+       No domain? Use: ./burrow init --mode simple --cover-domain <popular-https-site>"
+	fi
+	if [[ $BURROW_MODE == simple && -z $COVER_DOMAIN ]]; then
+		die "simple mode needs --cover-domain: a popular HTTPS site that is reachable (not blocked) where your users are."
+	fi
+	if [[ -z $PUBLIC_IPV4 ]]; then
+		if PUBLIC_IPV4=$(detect_public_ipv4); then
+			ok "detected public IPv4: $PUBLIC_IPV4"
+		else
+			PUBLIC_IPV4=''
+			warn "could not detect the public IPv4 address; set PUBLIC_IPV4 in $ENV_FILE if links need it"
+		fi
+	fi
+
+	SECRET=$(secret_new "$(config_front_host)") || die "cannot build a secret for '$(config_front_host)'"
+	config_validate || die "invalid settings (see above)"
+
+	mkdir -p "$(dirname "$ENV_FILE")"
+	config_write "$ENV_FILE"
+	ok "wrote $ENV_FILE (mode 0600, contains your secret)"
+	((quiet)) && return 0
+	say ""
+	say "Next:"
+	if [[ $BURROW_MODE == stealth && $TLS_MODE == acme ]]; then
+		say "  1. Point DNS:  $DOMAIN  A  ${PUBLIC_IPV4:-<server IPv4>}"
+		say "  2. Customise the decoy website: cp -r site site.local && edit site.local/"
+		say "  3. Start:      ./burrow up"
+	else
+		say "  ./burrow up"
+	fi
+}
+
+# ---------------------------------------------------------------------------
+# lifecycle
+
+wait_ready() {
+	info "waiting for the proxy to answer FakeTLS handshakes"
+	if ! tools_in_stack probe --host mtg --port 3128 --retries 40 --retry-delay 1 --timeout 5 >/dev/null; then
+		return 1
+	fi
+	ok "proxy is up"
+	if [[ $BURROW_MODE == stealth ]]; then
+		local tls_args=()
+		[[ $TLS_MODE == internal ]] && tls_args=(--insecure)
+		if tools_in_stack https --host mtg --port 3128 --sni "$DOMAIN" "${tls_args[@]}" \
+			--expect-status 200 --retries 45 --retry-delay 2 --timeout 5 >/dev/null; then
+			if [[ $TLS_MODE == internal ]]; then
+				ok "decoy website answers on https://$DOMAIN (self-signed: TLS_MODE=internal)"
+			else
+				ok "decoy website answers on https://$DOMAIN with a valid certificate"
+			fi
+		else
+			warn "the decoy website has no valid certificate yet. Check DNS for $DOMAIN, open port $HTTP_PORT, then: ./burrow logs decoy"
+		fi
+	fi
+}
+
+cmd_up() {
+	local wait=1
+	[[ ${1-} == --no-wait ]] && wait=0
+	load_config
+	require_docker
+	render_all
+	ensure_tools_image
+	info "starting burrow ($BURROW_MODE mode, project $BURROW_PROJECT)"
+	compose up --detach --remove-orphans --quiet-pull
+	if ((wait == 0)); then
+		ok "started (not waiting for readiness)"
+		return 0
+	fi
+	if ! wait_ready; then
+		compose ps >&2 || true
+		compose logs --tail 40 >&2 || true
+		die "the proxy did not become ready (logs above)"
+	fi
+	print_links
+	say "Next: ./burrow share (QR code)   ./burrow smoke (full self-test)   ./burrow status"
+}
+
+cmd_down() {
+	local args=()
+	[[ ${1-} == --volumes ]] && args=(--volumes)
+	config_load "$ENV_FILE"
+	[[ -f $STATE_DIR/compose.env ]] || render_all
+	compose down --remove-orphans "${args[@]}"
+	ok "stopped"
+}
+
+cmd_restart() {
+	load_config
+	render_all
+	compose restart
+	wait_ready || die "the proxy did not come back"
+}
+
+cmd_logs() {
+	config_load "$ENV_FILE"
+	compose logs --tail "${BURROW_LOG_TAIL:-200}" "$@"
+}
+
+cmd_update() {
+	load_config
+	require_docker
+	render_all
+	info "pulling pinned images"
+	compose pull --quiet --ignore-buildable
+	docker build --quiet --pull --target runtime -t "$(tools_image)" "$BURROW_ROOT/tools" >/dev/null
+	compose up --detach --remove-orphans
+	wait_ready || die "the proxy did not become ready after the update"
+	ok "updated"
+}
+
+# ---------------------------------------------------------------------------
+# status and metrics
+
+metrics_summary() {
+	local body
+	command -v curl >/dev/null 2>&1 || return 0
+	body=$(curl -fsS --max-time 3 "http://127.0.0.1:$METRICS_PORT/metrics" 2>/dev/null) || {
+		warn "metrics endpoint 127.0.0.1:$METRICS_PORT did not answer"
+		return 0
+	}
+	awk '
+		/^mtg_client_connections\{/            { clients += $NF }
+		/^mtg_telegram_connections\{/          { tg += $NF }
+		/^mtg_domain_fronting_connections\{/   { fronting += $NF }
+		/^mtg_telegram_traffic\{/              { traffic += $NF }
+		/^mtg_replay_attacks /                 { replays = $NF }
+		/^mtg_domain_fronting /                { fronted = $NF }
+		/^mtg_ip_blocklisted\{/                { blocked += $NF }
+		/^mtg_concurrency_limited /            { limited = $NF }
+		END {
+			printf "  connected clients     %d\n", clients
+			printf "  telegram connections  %d\n", tg
+			printf "  telegram traffic      %.1f MiB\n", traffic / 1048576
+			printf "  probes sent to decoy  %d (open now: %d)\n", fronted, fronting
+			printf "  replays blocked       %d\n", replays
+			printf "  blocklisted IPs hits  %d\n", blocked
+			printf "  over concurrency      %d\n", limited
+		}' <<<"$body" >&2
+}
+
+cmd_status() {
+	load_config
+	require_docker
+	info "containers"
+	compose ps >&2
+	if ! stack_running; then
+		warn "burrow is not running. Start it with: ./burrow up"
+		return 1
+	fi
+	info "health"
+	if tools_in_stack probe --host mtg --port 3128 --timeout 5 >/dev/null; then
+		ok "FakeTLS handshake succeeds"
+	else
+		fail "FakeTLS handshake fails (see ./burrow logs mtg)"
+	fi
+	info "traffic since start"
+	metrics_summary
+	print_links
+}
+
+# ---------------------------------------------------------------------------
+# sharing
+
+usage_link() {
+	cat >&2 <<'EOF'
+Usage: burrow link [--format all|tg|tme|secret]
+Prints share links on stdout (one per line), suitable for piping.
+EOF
+}
+
+cmd_link() {
+	local format=all
+	while (($#)); do
+		case $1 in
+		--format) format=$2 && shift ;;
+		-h | --help) usage_link && return 0 ;;
+		*) usage_link && die "unknown option: $1" ;;
+		esac
+		shift
+	done
+	load_config
+	local host
+	host=$(config_link_host)
+	case $format in
+	all) link_tg "$host" "$PROXY_PORT" "$SECRET" && link_tme "$host" "$PROXY_PORT" "$SECRET" ;;
+	tg) link_tg "$host" "$PROXY_PORT" "$SECRET" ;;
+	tme) link_tme "$host" "$PROXY_PORT" "$SECRET" ;;
+	secret) printf '%s\n' "$SECRET" ;;
+	*) die "unknown format: $format" ;;
+	esac
+}
+
+cmd_share() {
+	load_config
+	require_docker
+	ensure_tools_image
+	local link dir=$STATE_DIR/share
+	link=$(link_tme "$(config_link_host)" "$PROXY_PORT" "$SECRET")
+	mkdir -p "$dir"
+	chmod 0700 "$dir"
+	umask 077
+	info "scan with your phone camera, or send the link"
+	tools_on_host qr --format terminal <<<"$link" >&2
+	tools_on_host qr --format png <<<"$link" | write_atomic "$dir/burrow-proxy.png" 600
+	tools_on_host qr --format svg <<<"$link" | write_atomic "$dir/burrow-proxy.svg" 600
+	printf '%s\n' "$link" | write_atomic "$dir/link.txt" 600
+	print_links
+	ok "QR code saved to $dir/burrow-proxy.png and .svg (private files: they contain the secret)"
+	say "  Revoke every link at once with: ./burrow rotate"
+}
+
+cmd_rotate() {
+	local yes=0
+	[[ ${1-} == --yes || ${1-} == -y ]] && yes=1
+	config_load "$ENV_FILE"
+	if ((yes == 0)) && [[ -t 0 ]]; then
+		printf 'Rotating the secret disconnects everyone using the current link. Continue? [y/N] ' >&2
+		local answer
+		read -r answer
+		[[ $answer == [yY]* ]] || die "aborted" 0
+	fi
+	local new
+	new=$(secret_new "$(config_front_host)") || die "cannot build a new secret"
+	config_set_value "$ENV_FILE" SECRET "$new"
+	ok "new secret written to $ENV_FILE (old: $(secret_redact "$SECRET"))"
+	load_config
+	if command -v docker >/dev/null 2>&1 && stack_running; then
+		render_all
+		compose up --detach --remove-orphans
+		wait_ready || die "the proxy did not come back after rotation"
+	else
+		say "  burrow is not running; the new secret applies on the next ./burrow up"
+	fi
+	print_links
+}
+
+# ---------------------------------------------------------------------------
+# config
+
+cmd_config() {
+	local sub=${1:-show}
+	shift || true
+	case $sub in
+	show)
+		config_load "$ENV_FILE"
+		local key
+		for key in "${CONFIG_KEYS[@]}"; do
+			if [[ $key == SECRET ]]; then
+				printf '%s=%s\n' "$key" "$(secret_redact "$SECRET")"
+			else
+				printf '%s=%s\n' "$key" "${!key}"
+			fi
+		done
+		;;
+	get)
+		[[ $# -eq 1 ]] || die "usage: burrow config get KEY"
+		config_is_known_key "$1" || die "unknown setting $1"
+		config_load "$ENV_FILE"
+		printf '%s\n' "${!1}"
+		;;
+	set)
+		(($# >= 2 && $# % 2 == 0)) || die "usage: burrow config set KEY VALUE [KEY VALUE ...]"
+		local backup
+		backup=$(<"$ENV_FILE")
+		while (($#)); do
+			config_is_known_key "$1" || die "unknown setting $1"
+			[[ $1 != SECRET ]] || die "use ./burrow rotate to change the secret"
+			[[ $2 != *$'\n'* && $2 != *\"* ]] || die "value must not contain newlines or double quotes"
+			config_set_value "$ENV_FILE" "$1" "$2"
+			shift 2
+		done
+		config_load "$ENV_FILE"
+		if ! config_validate; then
+			printf '%s\n' "$backup" | write_atomic "$ENV_FILE" 600
+			die "rejected; $ENV_FILE is unchanged"
+		fi
+		ok "updated. Apply with: ./burrow up"
+		;;
+	*) die "usage: burrow config [show|get KEY|set KEY VALUE ...]" ;;
+	esac
+}
+
+cmd_render() {
+	load_config
+	render_all
+	ok "rendered into $STATE_DIR"
+}
+
+# ---------------------------------------------------------------------------
+# doctor
+
+cmd_doctor() {
+	local problems=0
+	info "host"
+	if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+		ok "Docker $(docker version --format '{{.Server.Version}}' 2>/dev/null)"
+		local cv
+		cv=$(docker compose version --short 2>/dev/null || echo 0)
+		if version_ge "${cv%%[-+]*}" "$MIN_COMPOSE_VERSION"; then ok "Docker Compose $cv"; else
+			fail "Docker Compose ${cv} (need >= $MIN_COMPOSE_VERSION)"
+			problems=$((problems + 1))
+		fi
+	else
+		fail "Docker is not installed or not reachable"
+		problems=$((problems + 1))
+	fi
+	if command -v timedatectl >/dev/null 2>&1; then
+		if [[ $(timedatectl show -p NTPSynchronized --value 2>/dev/null) == yes ]]; then ok "clock is NTP-synchronised"; else
+			warn "clock is not NTP-synchronised: FakeTLS rejects clients whose clocks differ by more than TIME_SKEW"
+		fi
+	fi
+	if [[ -r /proc/sys/net/ipv4/tcp_congestion_control ]]; then
+		local cc
+		cc=$(</proc/sys/net/ipv4/tcp_congestion_control)
+		if [[ $cc == bbr ]]; then ok "TCP congestion control: bbr"; else warn "TCP congestion control is $cc; scripts/install-host.sh enables bbr"; fi
+	fi
+
+	info "configuration"
+	if [[ ! -f $ENV_FILE ]]; then
+		fail "no $ENV_FILE yet (./burrow init)"
+		return 1
+	fi
+	config_load "$ENV_FILE"
+	if config_validate; then ok "$ENV_FILE is valid ($BURROW_MODE mode)"; else problems=$((problems + 1)); fi
+	local perms
+	perms=$(stat -c %a "$ENV_FILE" 2>/dev/null || stat -f %Lp "$ENV_FILE")
+	if [[ $perms == 600 || $perms == 400 ]]; then ok ".env permissions $perms"; else
+		warn ".env is mode $perms; run chmod 600 $ENV_FILE"
+	fi
+
+	if [[ $BURROW_MODE == stealth ]]; then
+		if [[ $(site_source_dir) == "$BURROW_ROOT/site" ]]; then
+			warn "the decoy site is the stock template. Make it yours: cp -r site site.local, then edit site.local/"
+		else
+			ok "custom decoy site in site.local/"
+		fi
+		if [[ $TLS_MODE == acme ]] && command -v getent >/dev/null 2>&1; then
+			local resolved
+			resolved=$(getent ahostsv4 "$DOMAIN" 2>/dev/null | awk '{print $1; exit}')
+			if [[ -z $resolved ]]; then
+				fail "$DOMAIN does not resolve. Add an A record pointing to ${PUBLIC_IPV4:-this server}"
+				problems=$((problems + 1))
+			elif [[ -n $PUBLIC_IPV4 && $resolved != "$PUBLIC_IPV4" ]]; then
+				fail "$DOMAIN resolves to $resolved, but this server is $PUBLIC_IPV4 (SNI and DNS must match)"
+				problems=$((problems + 1))
+			else
+				ok "$DOMAIN resolves to $resolved"
+			fi
+		fi
+	else
+		warn "simple mode impersonates $COVER_DOMAIN from an IP it does not own; stealth mode is much harder to detect"
+	fi
+
+	if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+		info "mtg doctor (time drift, Telegram reachability, fronting, SNI/DNS)"
+		render_all
+		if stack_running; then
+			if ! compose --progress quiet run --rm --no-deps -T --entrypoint /mtg mtg doctor /config.toml >&2; then
+				if [[ $TLS_MODE == internal ]]; then
+					warn "certificate and SNI/DNS findings above are expected with TLS_MODE=internal"
+				else
+					problems=$((problems + 1))
+				fi
+			fi
+		else
+			warn "start burrow first for the full mtg doctor run (fronting needs the decoy)"
+		fi
+	fi
+
+	if ((problems)); then
+		fail "$problems problem(s) found"
+		return 1
+	fi
+	ok "all good"
+}
+
+# ---------------------------------------------------------------------------
+# smoke tests
+
+usage_smoke() {
+	cat >&2 <<'EOF'
+Usage: burrow smoke [--no-telegram]
+       burrow smoke --link 'tg://proxy?server=...&port=...&secret=...' [--insecure] [--no-telegram]
+
+Without --link: tests the local stack from inside its Docker network.
+With --link:    tests any burrow/mtg proxy over the internet, the way a user
+                (and a censor) would reach it. No .env needed.
+EOF
+}
+
+urldecode() { printf '%b' "${1//%/\\x}"; }
+
+parse_link() { # sets LINK_SERVER LINK_PORT LINK_SECRET
+	local query=${1#*\?} pair key value
+	LINK_SERVER='' LINK_PORT='' LINK_SECRET=''
+	local IFS='&'
+	for pair in $query; do
+		key=${pair%%=*} value=$(urldecode "${pair#*=}")
+		case $key in
+		server) LINK_SERVER=$value ;;
+		port) LINK_PORT=$value ;;
+		secret) LINK_SECRET=$value ;;
+		esac
+	done
+	[[ -n $LINK_SERVER && -n $LINK_PORT && -n $LINK_SECRET ]] || die "not a proxy link: $1"
+	is_port "$LINK_PORT" || die "bad port in link: $LINK_PORT"
+	{ is_hostname "$LINK_SERVER" || is_ip "$LINK_SERVER"; } || die "bad server in link: $LINK_SERVER"
+}
+
+_smoke_check() { # _smoke_check DESCRIPTION -- runner args...
+	local description=$1 output
+	shift
+	if output=$("$@" 2>&1); then
+		ok "$description"
+		SMOKE_PASSED=$((SMOKE_PASSED + 1))
+	else
+		fail "$description"
+		say "      ${C_DIM}${output//$'\n'/$'\n      '}${C_RESET}"
+		SMOKE_FAILED=$((SMOKE_FAILED + 1))
+	fi
+}
+
+cmd_smoke() {
+	local link='' telegram=1 insecure=0
+	while (($#)); do
+		case $1 in
+		--link) link=$2 && shift ;;
+		--no-telegram) telegram=0 ;;
+		--insecure) insecure=1 ;;
+		-h | --help) usage_smoke && return 0 ;;
+		*) usage_smoke && die "unknown option: $1" ;;
+		esac
+		shift
+	done
+	require_docker
+	ensure_tools_image
+
+	local runner host port sni secret
+	if [[ -n $link ]]; then
+		parse_link "$link"
+		runner=tools_on_host host=$LINK_SERVER port=$LINK_PORT secret=$LINK_SECRET
+		secret_is_valid "$secret" || die "the link does not carry a FakeTLS (ee...) secret"
+		sni=$(secret_host "$secret")
+		info "smoke-testing $host:$port (fronting as $sni) from this machine"
+	else
+		load_config
+		stack_running || die "burrow is not running (./burrow up)"
+		runner=tools_in_stack host=mtg port=3128 secret=$SECRET sni=$(config_front_host)
+		[[ $TLS_MODE == internal ]] && insecure=1
+		info "smoke-testing the local stack ($BURROW_MODE mode)"
+	fi
+	local tls_args=()
+	((insecure)) && tls_args=(--insecure)
+
+	SMOKE_PASSED=0 SMOKE_FAILED=0
+	local wrong
+	wrong=$(secret_new "$sni")
+	export PROBE_SECRET=$secret
+	_smoke_check "valid client completes the FakeTLS handshake" \
+		"$runner" probe --host "$host" --port "$port" --retries 3
+	if ((telegram)); then
+		_smoke_check "Telegram answers through the proxy (req_pq_multi -> resPQ)" \
+			"$runner" probe --host "$host" --port "$port" --telegram --retries 2 --retry-delay 2
+	fi
+	_smoke_check "replayed handshake is refused (anti-replay)" \
+		"$runner" replay --host "$host" --port "$port"
+	_smoke_check "client with a 10-minute clock skew is refused" \
+		"$runner" probe --host "$host" --port "$port" --time-offset 600 --expect fronted
+	PROBE_SECRET=$wrong _smoke_check "wrong secret gets the cover website, not the proxy" \
+		"$runner" probe --host "$host" --port "$port" --expect fronted
+	if [[ -z $link && $BURROW_MODE == simple ]]; then
+		_smoke_check "browsers and probes see $sni over real TLS" \
+			"$runner" https --host "$host" --port "$port" --sni "$sni" "${tls_args[@]}" --retries 3
+	else
+		_smoke_check "browsers and probes see a real website at https://$sni" \
+			"$runner" https --host "$host" --port "$port" --sni "$sni" "${tls_args[@]}" --expect-status 200 --retries 15 --retry-delay 2
+	fi
+	_smoke_check "plain-HTTP scanners get a web server's answer" \
+		"$runner" plaintext --host "$host" --port "$port" --expect-text "HTTP/"
+	if [[ -z $link ]] && command -v curl >/dev/null 2>&1; then
+		_smoke_check "metrics are served on 127.0.0.1:$METRICS_PORT only" \
+			curl -fsS --max-time 5 -o /dev/null "http://127.0.0.1:$METRICS_PORT/metrics"
+	fi
+	unset PROBE_SECRET
+
+	if ((SMOKE_FAILED)); then
+		fail "$SMOKE_FAILED of $((SMOKE_PASSED + SMOKE_FAILED)) checks failed"
+		return 1
+	fi
+	ok "all $SMOKE_PASSED checks passed"
+}
+
+# ---------------------------------------------------------------------------
+# watchdog (run by the systemd timer from scripts/install-host.sh)
+
+cmd_watchdog() {
+	load_config
+	require_docker
+	if [[ ! -f $STATE_DIR/compose.env || -z $(compose ps --all --quiet mtg 2>/dev/null) ]]; then
+		say "burrow is not deployed here (or was stopped with ./burrow down); nothing to watch"
+		return 0
+	fi
+	local timeout=${BURROW_WATCHDOG_TIMEOUT:-10}
+	if tools_in_stack probe --host mtg --port 3128 --retries 2 --retry-delay 5 --timeout "$timeout" >/dev/null 2>&1; then
+		say "burrow watchdog: proxy healthy"
+	else
+		say "burrow watchdog: FakeTLS probe failed 3 times, restarting mtg"
+		command -v logger >/dev/null 2>&1 && logger -t burrow "watchdog restarted mtg"
+		compose up --detach --force-recreate --no-deps mtg
+		tools_in_stack probe --host mtg --port 3128 --retries 20 --retry-delay 1 >/dev/null 2>&1 ||
+			die "burrow watchdog: mtg is still unhealthy after a restart"
+	fi
+	if [[ $BURROW_MODE == stealth ]]; then
+		if ! tools_in_stack https --host mtg --port 3128 --sni "$DOMAIN" --insecure --retries 2 --retry-delay 5 >/dev/null 2>&1; then
+			say "burrow watchdog: decoy website unreachable, restarting it"
+			compose up --detach --force-recreate --no-deps decoy
+		fi
+	fi
+}
+
+# ---------------------------------------------------------------------------
+# try: a throwaway local instance
+
+cmd_try() {
+	ENV_FILE=$BURROW_ROOT/.try/.env
+	STATE_DIR=$BURROW_ROOT/.try/state
+	BURROW_PROJECT=burrow-try
+	if [[ ${1-} == --down ]]; then
+		if [[ -f $ENV_FILE ]]; then
+			cmd_down --volumes
+		fi
+		rm -rf -- "$BURROW_ROOT/.try"
+		ok "trial instance removed"
+		return 0
+	fi
+	require_docker
+	if [[ ! -f $ENV_FILE ]]; then
+		local proxy_port http_port metrics_port
+		if ! proxy_port=$(free_port) || ! http_port=$(free_port) || ! metrics_port=$(free_port); then
+			die "no free local ports found"
+		fi
+		mkdir -p "$BURROW_ROOT/.try"
+		chmod 0700 "$BURROW_ROOT/.try"
+		cmd_init --domain burrow-try.test --tls internal --bind 127.0.0.1 \
+			--port "$proxy_port" --http-port "$http_port" --metrics-port "$metrics_port" \
+			--ipv4 127.0.0.1 --link-host 127.0.0.1 --no-blocklist --quiet \
+			--subnet 10.203.48.0/28 # its own subnet, so a trial can run next to a real deployment
+	fi
+	cmd_up
+	cmd_smoke
+	cmd_share
+	say ""
+	say "${C_BOLD}Try it:${C_RESET} open the app link above in Telegram Desktop on ${C_BOLD}this machine${C_RESET}"
+	say "(the trial listens on 127.0.0.1 only). Remove it with: ./burrow try --down"
+}
+
+# ---------------------------------------------------------------------------
+# deploy: install on a fresh server over SSH
+
+usage_deploy() {
+	cat >&2 <<'EOF'
+Usage: burrow deploy USER@HOST --domain NAME [options]
+
+  --domain NAME        stealth mode domain (A record must point at HOST)
+  --mode, --cover-domain, --email, --port, --http-port, --enable-ipv6, --link-host,
+  --ipv4, --ipv6, --acme-ca, --tls, --bind, --metrics-port, --subnet, --no-blocklist
+                       passed to `burrow init` on the server (first deploy only)
+  --dir PATH           install directory on the server (default /opt/burrow)
+  --ssh-port N         SSH port (default 22)
+  -i, --identity FILE  SSH private key
+  --no-host-setup      skip scripts/install-host.sh (Docker, firewall, sysctl, watchdog)
+  --no-local-smoke     skip the smoke test from this machine
+
+Idempotent: re-running upgrades the code and keeps the server's .env/secret.
+EOF
+}
+
+project_files() {
+	local f
+	for f in burrow lib compose.yaml compose.ipv6.yaml compose.nolog.yaml site site.local \
+		tools/Dockerfile tools/.dockerignore tools/pyproject.toml tools/requirements.txt \
+		tools/requirements-dev.txt tools/burrow_tools tools/tests scripts deploy \
+		README.md LICENSE CHANGELOG.md SECURITY.md .env.example; do
+		[[ -e $BURROW_ROOT/$f ]] && printf '%s\n' "$f"
+	done
+}
+
+cmd_deploy() {
+	local target='' dir=/opt/burrow ssh_port=22 identity='' host_setup=1 local_smoke=1
+	local init_args=() proxy_port=443 http_port=80
+	while (($#)); do
+		case $1 in
+		--dir) dir=$2 && shift ;;
+		--ssh-port) ssh_port=$2 && shift ;;
+		-i | --identity) identity=$2 && shift ;;
+		--no-host-setup) host_setup=0 ;;
+		--no-local-smoke) local_smoke=0 ;;
+		--port) proxy_port=$2 && init_args+=("$1" "$2") && shift ;;
+		--http-port) http_port=$2 && init_args+=("$1" "$2") && shift ;;
+		--domain | --mode | --cover-domain | --email | --link-host | --ipv4 | --ipv6 | --acme-ca | \
+			--tls | --bind | --metrics-port | --subnet)
+			init_args+=("$1" "$2") && shift
+			;;
+		--enable-ipv6 | --no-blocklist) init_args+=("$1") ;;
+		-h | --help) usage_deploy && return 0 ;;
+		-*) usage_deploy && die "unknown option: $1" ;;
+		*)
+			[[ -z $target ]] || die "only one target allowed"
+			target=$1
+			;;
+		esac
+		shift
+	done
+	[[ $target == *@* ]] || {
+		usage_deploy
+		die "give a target like root@203.0.113.7"
+	}
+	is_port "$ssh_port" || die "bad --ssh-port"
+	is_abs_path "$dir" || die "--dir must be an absolute path"
+	need ssh
+	need tar
+
+	local control
+	control=$(mktemp -d "${TMPDIR:-/tmp}/burrow-ssh.XXXXXX")
+	# shellcheck disable=SC2064 # expand now: $control is local
+	trap "ssh -o ControlPath='$control/cm' -O exit '$target' >/dev/null 2>&1 || true; rm -rf -- '$control'" EXIT
+	local ssh_opts=(-p "$ssh_port" -o ControlMaster=auto -o "ControlPath=$control/cm" -o ControlPersist=300
+		-o ServerAliveInterval=15 -o ConnectTimeout=15)
+	[[ -n $identity ]] && ssh_opts+=(-i "$identity")
+	# Remote commands are built with printf %q on purpose: they expand remotely.
+	# shellcheck disable=SC2029
+	rsh() { ssh "${ssh_opts[@]}" "$target" "$@"; }
+	rsh_tty() { ssh -t "${ssh_opts[@]}" "$target" "$@"; }
+
+	info "connecting to $target"
+	local uid sudo=''
+	uid=$(rsh id -u) || die "cannot SSH to $target"
+	[[ $uid == 0 ]] || sudo='sudo'
+	local qdir
+	qdir=$(printf '%q' "$dir")
+
+	info "uploading burrow to $target:$dir"
+	local files=()
+	mapfile -t files < <(project_files)
+	COPYFILE_DISABLE=1 tar -czf - -C "$BURROW_ROOT" --exclude '__pycache__' --exclude '*.pyc' "${files[@]}" |
+		rsh "$sudo mkdir -p $qdir && $sudo tar -xzf - -C $qdir --no-same-owner && $sudo chmod 0755 $qdir"
+
+	if ((host_setup)); then
+		info "preparing the host (Docker, firewall, kernel tuning, time sync, watchdog)"
+		rsh_tty "$sudo $qdir/scripts/install-host.sh --dir $qdir --ssh-port $ssh_port --ports $http_port,$proxy_port"
+	fi
+
+	if rsh "$sudo test -f $qdir/.env"; then
+		info "keeping the existing configuration and secret on the server"
+	else
+		info "initialising (the secret is generated on the server and never leaves it except in links)"
+		rsh "$sudo $qdir/burrow init $(printf '%q ' "${init_args[@]}")"
+	fi
+	rsh "$sudo $qdir/burrow up"
+	rsh "$sudo $qdir/burrow smoke"
+
+	local link
+	link=$(rsh "$sudo $qdir/burrow link --format tg")
+	if ((local_smoke)) && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+		info "testing from this machine, across the internet"
+		local smoke_args=(--link "$link")
+		[[ $(rsh "$sudo $qdir/burrow config get TLS_MODE") == internal ]] && smoke_args+=(--insecure)
+		cmd_smoke "${smoke_args[@]}" || warn "the server passes locally but not from here: check firewalls and DNS between you and $target"
+	fi
+	say ""
+	say "${C_BOLD}Deployed.${C_RESET} Share link:"
+	printf '%s\n' "$link"
+}
+
+# ---------------------------------------------------------------------------
+# uninstall
+
+cmd_uninstall() {
+	local purge=0
+	[[ ${1-} == --purge ]] && purge=1
+	if [[ -f $ENV_FILE ]]; then
+		config_load "$ENV_FILE"
+		[[ -f $STATE_DIR/compose.env ]] || render_all
+		compose down --remove-orphans --volumes || true
+	fi
+	if [[ -f /etc/systemd/system/burrow-watchdog.timer && $EUID -eq 0 ]]; then
+		systemctl disable --now burrow-watchdog.timer >/dev/null 2>&1 || true
+		rm -f /etc/systemd/system/burrow-watchdog.timer /etc/systemd/system/burrow-watchdog.service
+		systemctl daemon-reload
+		ok "removed the watchdog timer"
+	fi
+	docker image rm "$(tools_image)" >/dev/null 2>&1 || true
+	rm -rf -- "$STATE_DIR"
+	if ((purge)); then
+		rm -f -- "$ENV_FILE"
+		ok "removed containers, volumes, state and $ENV_FILE"
+	else
+		ok "removed containers, volumes and state (kept $ENV_FILE; --purge deletes it)"
+	fi
+}
+
+# ---------------------------------------------------------------------------
+
+usage() {
+	cat >&2 <<EOF
+${C_BOLD}burrow${C_RESET} $BURROW_VERSION: your own stealthy Telegram proxy (mtg + a real decoy website)
+
+Setup
+  init       create .env with a fresh secret     (init --help)
+  up         render config, start, self-check, print links (--no-wait)
+  try        throwaway local instance on 127.0.0.1 (try --down to remove)
+  deploy     install on a server over SSH          (deploy --help)
+
+Share
+  link       print share links                   (link --format tg|tme|secret)
+  share      links + QR code (terminal, PNG, SVG)
+  rotate     new secret: revokes every link at once
+
+Operate
+  status     containers, health, traffic counters
+  smoke      end-to-end self-test                (smoke --link LINK tests any proxy)
+  doctor     check host, DNS, clock, configuration
+  logs       container logs                      (logs -f mtg)
+  restart | down [--volumes] | update | watchdog | uninstall [--purge]
+  config     show | get KEY | set KEY VALUE
+  render     write state/ without starting anything
+
+Environment: BURROW_ENV_FILE, BURROW_STATE_DIR, BURROW_PROJECT, NO_COLOR
+EOF
+}
+
+main() {
+	local cmd=${1:-help} fn
+	shift || true
+	case $cmd in
+	init | up | down | restart | status | logs | link | share | rotate | config | render | doctor | smoke | watchdog | update | try | deploy | uninstall)
+		fn=cmd_$cmd
+		;;
+	start) fn=cmd_up ;;
+	stop) fn=cmd_down ;;
+	version | --version | -v)
+		printf 'burrow %s\n' "$BURROW_VERSION"
+		return 0
+		;;
+	help | --help | -h)
+		usage
+		return 0
+		;;
+	*)
+		usage
+		die "unknown command: $cmd"
+		;;
+	esac
+	"$fn" "$@" || exit $?
+}
+
+main "$@"

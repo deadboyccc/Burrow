@@ -1,0 +1,167 @@
+# burrow: hardened MTProto proxy stack.
+#
+# Don't run `docker compose` against this file by hand. Use ./burrow: it
+# renders state/ from .env, then passes the env file, project name, profiles
+# and overlays (compose.ipv6.yaml, compose.nolog.yaml) consistently.
+#
+# Images are pinned by digest. Dependabot bumps them in reviewed PRs.
+
+name: burrow
+
+x-hardened: &hardened
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  logging:
+    driver: local
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  # The proxy. Owns the public TLS port; valid FakeTLS clients are relayed to
+  # Telegram, everything else is spliced to the decoy website.
+  mtg:
+    <<: *hardened
+    image: nineseconds/mtg:2.3.0@sha256:9553495b5216cbe6b238e88ce8a3d43ef582e4dc45fcdd7a14d54497500f5d4f
+    user: "65534:65534"
+    command: ["run", "/config.toml"]
+    volumes:
+      - type: bind
+        source: ${BURROW_STATE_DIR:?render with ./burrow up}/mtg.toml
+        target: /config.toml
+        read_only: true
+      - type: bind
+        source: ${BURROW_STATE_DIR}/lists
+        target: /lists
+        read_only: true
+    ports:
+      - name: proxy
+        target: 3128
+        published: "${PROXY_PORT}"
+        host_ip: ${BIND_ADDR}
+        protocol: tcp
+      - name: metrics
+        target: 3129
+        published: "${METRICS_PORT}"
+        host_ip: 127.0.0.1
+        protocol: tcp
+    networks:
+      edge: {}
+    depends_on:
+      decoy:
+        condition: service_healthy
+        required: false
+    labels:
+      io.burrow.config-hash: ${MTG_CONFIG_HASH}
+    ulimits:
+      nofile: { soft: 65536, hard: 65536 }
+    sysctls:
+      net.core.somaxconn: "4096"
+      net.ipv4.ip_local_port_range: "1024 65000"
+    mem_limit: ${MTG_MEMORY_LIMIT}
+    pids_limit: 512
+    stop_grace_period: 15s
+
+  # One-shot: hand the certificate volume to the unprivileged decoy user.
+  decoy-init:
+    image: busybox:1.37.0@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec
+    profiles: [stealth]
+    user: "0:0"
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+    command:
+      - sh
+      - -c
+      - '[ "$$(stat -c %u /data)" = 65534 ] || { chmod 0700 /data && chown 65534:65534 /data; }'
+    volumes:
+      - type: volume
+        source: decoy-data
+        target: /data
+        volume: { nocopy: true }
+
+  # The decoy website with a real certificate. Never published on 443:
+  # mtg is the only way in.
+  decoy:
+    <<: *hardened
+    image: caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
+    profiles: [stealth]
+    user: "65534:65534"
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+    volumes:
+      - type: bind
+        source: ${BURROW_STATE_DIR}/Caddyfile
+        target: /etc/caddy/Caddyfile
+        read_only: true
+      - type: bind
+        source: ${BURROW_STATE_DIR}/site
+        target: /srv
+        read_only: true
+      - type: volume
+        source: decoy-data
+        target: /data
+        volume: { nocopy: true }
+    tmpfs:
+      - /config:size=8m,uid=65534,gid=65534,mode=0700
+      - /tmp:size=16m,uid=65534,gid=65534,mode=0700
+    ports:
+      # ACME HTTP-01 challenges and http->https redirects.
+      - name: http
+        target: 8080
+        published: "${HTTP_PORT}"
+        host_ip: ${BIND_ADDR}
+        protocol: tcp
+    networks:
+      edge:
+        ipv4_address: ${DECOY_IP}
+    depends_on:
+      decoy-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2020/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+      start_interval: 1s
+    labels:
+      io.burrow.config-hash: ${DECOY_CONFIG_HASH}
+    mem_limit: ${DECOY_MEMORY_LIMIT}
+    pids_limit: 256
+    stop_grace_period: 10s
+
+  # Probes and QR codes. Only ever started on demand by ./burrow.
+  tools:
+    image: burrow-tools:${BURROW_VERSION}
+    build:
+      context: ./tools
+      target: runtime
+    profiles: [tools]
+    user: "65534:65534"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+    environment:
+      - BURROW_SECRET
+    networks:
+      edge: {}
+    mem_limit: 128m
+    pids_limit: 64
+
+networks:
+  edge:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${EDGE_SUBNET}
+
+volumes:
+  # Let's Encrypt account and certificates. Keep it: re-issuing too often
+  # hits rate limits.
+  decoy-data:

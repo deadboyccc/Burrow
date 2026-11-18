@@ -103,7 +103,7 @@ That's everything. It installs git/curl, fetches the pinned burrow release into
 security updates, watchdog), creates the secret, starts the proxy, runs the full smoke test
 and prints your share links and QR code. Re-run the same command later to upgrade (your
 secret is kept). Preview it first with `BURROW_DRY_RUN=1`. Every option is in the
-[README](../README.md#install-on-a-server-one-command); the common ones:
+[Configuration](CONFIGURATION.md#installer-settings); the common ones:
 
 | Variable | Example |
 |---|---|

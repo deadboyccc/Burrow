@@ -7,7 +7,7 @@ Thanks for helping Digby dig. 🐾
 2. Shell code: Bash ≥ 4.4, `set -Eeuo pipefail`, shellcheck-clean, formatted with `make fmt`.
    Validate every value that reaches a config file in `lib/validate.sh`.
 3. New settings: add them to `CONFIG_KEYS`, `config_set_defaults`, `config_validate`,
-   `config_write`, `.env.example` and the README, with tests.
+   `config_write`, `.env.example` and `docs/CONFIGURATION.md`, with tests.
 4. Pin everything: images by digest, Python packages by hash (`tools/requirements*.txt`
    come from `pip-compile --generate-hashes`), actions by commit SHA.
 5. Add an entry under `[Unreleased]` in `CHANGELOG.md`.

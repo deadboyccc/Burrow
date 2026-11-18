@@ -32,4 +32,4 @@ Only the latest release receives fixes. Upgrade by re-running the one-command in
 - Never paste `.env`, `burrow link` output or `state/share/` files into issues or chats.
   `burrow config show` redacts the secret for that reason.
 
-See README §7 for the full threat model.
+See [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) for the full threat model.

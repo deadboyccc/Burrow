@@ -6,6 +6,30 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-11-18
+
+A documentation release. The 500-line README is now a compact front page plus focused
+guides. There are no behaviour changes; upgrading is optional.
+
+### Changed
+
+- **README** is now a one-screen front page: what burrow is, the one-command install, a
+  diagram, everyday commands, features, and a map of the documentation.
+- **New focused guides in `docs/`**, one per reader:
+  - `USAGE.md`: commands, sharing, revoking access, self-tests.
+  - `CONFIGURATION.md`: installer variables, `.env` settings, your own decoy website.
+  - `OPERATIONS.md`: day-to-day tasks, reliability, measured performance and capacity,
+    troubleshooting.
+  - `THREAT-MODEL.md`: what burrow protects against, what it doesn't, privacy, host
+    hardening.
+  - `DESIGN.md`: how a connection is handled, and why these technologies.
+  - `DEVELOPMENT.md`: tests, CI, the release checklist, project layout.
+- Capacity figures now come from a real benchmark of a 1 vCPU / 1 GB VPS: about 300
+  simultaneous users with normal use.
+- Cross-references now point at the new pages: the generated `.env`, `SECURITY.md`,
+  `CONTRIBUTING.md` and the deployment guide. The website gains a "Docs" link.
+- `burrow deploy` now uploads `docs/` and `CONTRIBUTING.md` too.
+
 ## [1.1.2] - 2026-11-18
 
 A documentation release: what burrow records about the people who use your proxy, verified
@@ -196,7 +220,8 @@ First release. Digby the mole digs his first tunnel.
   release workflow with checksums, and a GitHub Pages site starring Digby.
 - Documentation: an in-depth README and an A-Z deployment guide (`docs/DEPLOY.md`).
 
-[Unreleased]: https://github.com/deadboyccc/Burrow/compare/v1.1.2...HEAD
+[Unreleased]: https://github.com/deadboyccc/Burrow/compare/v1.1.3...HEAD
+[1.1.3]: https://github.com/deadboyccc/Burrow/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/deadboyccc/Burrow/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/deadboyccc/Burrow/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/deadboyccc/Burrow/compare/v1.0.0...v1.1.0

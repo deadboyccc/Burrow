@@ -149,7 +149,8 @@ cmd_init() {
 
 	if [[ $BURROW_MODE == stealth && -z $DOMAIN ]]; then
 		die "stealth mode needs --domain: a domain you own whose A record points at this server.
-       No domain? Use: ./burrow init --mode simple --cover-domain <popular-https-site>"
+       No domain? Use your IP as a free wildcard-DNS name: --domain 203-0-113-7.sslip.io --link-host 203.0.113.7
+       Last resort: ./burrow init --mode simple --cover-domain <popular-https-site>"
 	fi
 	if [[ $BURROW_MODE == simple && -z $COVER_DOMAIN ]]; then
 		die "simple mode needs --cover-domain: a popular HTTPS site that is reachable (not blocked) where your users are."

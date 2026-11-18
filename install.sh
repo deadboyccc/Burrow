@@ -5,7 +5,11 @@
 #     curl -fsSL https://raw.githubusercontent.com/deadboyccc/Burrow/main/install.sh |
 #       sudo BURROW_DOMAIN=notes.example.com BURROW_EMAIL=you@example.com bash
 #
-#   Simple mode (no domain; impersonate a popular site reachable where your users are):
+#   No domain? Your IP as a free wildcard-DNS name still gets a real certificate:
+#     curl -fsSL https://raw.githubusercontent.com/deadboyccc/Burrow/main/install.sh |
+#       sudo BURROW_DOMAIN=203-0-113-7.sslip.io BURROW_LINK_HOST=203.0.113.7 bash
+#
+#   Simple mode (last resort; impersonate a popular site reachable where your users are):
 #     curl -fsSL https://raw.githubusercontent.com/deadboyccc/Burrow/main/install.sh |
 #       sudo BURROW_COVER_DOMAIN=www.wikipedia.org bash
 #
@@ -78,7 +82,7 @@ main() {
 		die "set BURROW_DOMAIN (stealth mode) or BURROW_COVER_DOMAIN (simple mode), not both"
 	fi
 	if [[ -z $domain && -z $cover ]]; then
-		die "set BURROW_DOMAIN=your.domain (recommended) or BURROW_COVER_DOMAIN=popular.site (no domain).
+		die "set BURROW_DOMAIN=your.domain (no domain? use your IP as 203-0-113-7.sslip.io) or BURROW_COVER_DOMAIN=popular.site.
        Example: curl -fsSL https://raw.githubusercontent.com/deadboyccc/Burrow/main/install.sh | sudo BURROW_DOMAIN=notes.example.com bash"
 	fi
 	local host_re='^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$'

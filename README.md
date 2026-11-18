@@ -98,8 +98,12 @@ anyone, because one DNS lookup shows that `microsoft.com` doesn't live there. Th
 3. mtg in front of it, on port 443.
 
 DNS, SNI and the certificate then all agree, and every non-Telegram visitor gets a real
-website. burrow automates exactly this and calls it **stealth mode** (the default). For when you
-have no domain, **simple mode** impersonates a third-party site instead: easier, weaker.
+website. burrow automates exactly this and calls it **stealth mode** (the default).
+
+**No domain?** A free wildcard-DNS name such as `203-0-113-7.sslip.io` resolves to the IP
+written inside it, so you still get stealth mode with a real certificate. Point share links at
+the IP (`LINK_HOST`), so clients never depend on that DNS service. **Simple mode**, which
+impersonates a third-party site, is the last resort: easier to set up, easier to spot.
 
 ### The packaging: hardened Docker Compose, driven by one CLI
 
@@ -150,7 +154,7 @@ just like any website.
 
 | | **stealth** (default) | **simple** |
 |---|---|---|
-| Needs | a domain pointing at the server | nothing |
+| Needs | a domain pointing at the server, or a free wildcard-DNS name like `203-0-113-7.sslip.io` | nothing |
 | What probes see | **your** site, **your** valid certificate | the real `COVER_DOMAIN` site, relayed |
 | DNS ↔ IP ↔ SNI consistent | ✅ yes | ❌ no (the cover domain doesn't resolve to you) |
 | Ports | 443 (+80 for ACME) | 443 |
@@ -171,7 +175,11 @@ Run this **on the server**, as root. Settings are environment variables:
 curl -fsSL https://raw.githubusercontent.com/deadboyccc/Burrow/main/install.sh |
   sudo BURROW_DOMAIN=notes.example.com BURROW_EMAIL=you@example.com bash
 
-# no domain? simple mode, impersonating a popular site your users can reach:
+# no domain? your IP as a free wildcard-DNS name: still stealth mode, still a real certificate
+curl -fsSL https://raw.githubusercontent.com/deadboyccc/Burrow/main/install.sh |
+  sudo BURROW_DOMAIN=203-0-113-7.sslip.io BURROW_LINK_HOST=203.0.113.7 bash
+
+# last resort, simple mode: impersonate a popular site reachable where your users are
 curl -fsSL https://raw.githubusercontent.com/deadboyccc/Burrow/main/install.sh |
   sudo BURROW_COVER_DOMAIN=www.wikipedia.org bash
 ```
@@ -309,9 +317,17 @@ servers would be a fingerprint. Copy it and edit freely:
 cp -r site site.local && $EDITOR site.local/index.html && ./burrow up
 ```
 
-`site.local/` is git-ignored and used automatically. `{{SITE_NAME}}`, `{{DOMAIN}}`,
-`{{YEAR}}` and `{{ACCENT}}` are filled in for you. `burrow doctor` warns while you're still
-on the template.
+`site.local/` is git-ignored and used automatically, and re-running the installer never
+touches it. `{{SITE_NAME}}`, `{{DOMAIN}}`, `{{YEAR}}` and `{{ACCENT}}` are filled in for you.
+`burrow doctor` warns while you're still on the template.
+
+Rules for your own pages:
+
+- The decoy sends a strict Content-Security-Policy. Put CSS in files (`<link rel="stylesheet"
+  href="/style.css">`), not in `<style>` blocks or `style=""` attributes. Scripts are blocked
+  entirely, and images must come from the site itself.
+- Keep a `404.html`: scanners probe paths like `/wp-admin`.
+- Dotfiles (`.git`, `.DS_Store`) are never published.
 
 ---
 
@@ -446,6 +462,8 @@ CI runs every suite on each push and pull request, plus weekly to catch upstream
 | `Pool overlaps with other one on this host` | Another Docker network uses `10.203.47.0/28`: `./burrow config set EDGE_SUBNET 10.77.1.0/28 DECOY_IP 10.77.1.10`. |
 | Telegram blocked *from the server* | Set `UPSTREAM_PROXIES=socks5://…` (e.g. a local sing-box/WireGuard egress). |
 | Port 443 already in use | Another web server owns it. burrow must own 443: move the other site behind burrow's decoy (`site.local/`), or use another server. |
+| My custom page shows up unstyled | Inline `<style>` is blocked by the decoy's Content-Security-Policy. Move the CSS into `site.local/style.css` and link it. |
+| No domain, but I want a real certificate | Use `<your-ip-with-dashes>.sslip.io` as the domain and set `LINK_HOST` to the IP. |
 
 ---
 

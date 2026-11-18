@@ -18,8 +18,9 @@ here, in order. Commands in `this style` are copy-paste ready. Replace the examp
 - [ ] A computer with a terminal (Linux, macOS, or Windows with WSL) and `ssh`.
 - [ ] Optional but recommended: Docker on that computer too, for the final check from *your* side.
 
-No domain at all? You can still deploy in **simple mode** (step F, "No domain?"). It is easier
-to detect, so get a domain when you can.
+No domain? Use your server's IP as a free wildcard-DNS name such as
+`203-0-113-7.sslip.io`. That still gives stealth mode with a real certificate (step F,
+"No domain?"). Simple mode is the last resort.
 
 ## B. Choose a server
 
@@ -52,6 +53,9 @@ ssh root@203.0.113.7 'echo connected'
 way. Otherwise deploy as `root`.)
 
 ## D. Point your domain at the server
+
+> **No domain?** Skip this step. `203-0-113-7.sslip.io` (your IP with dashes) already
+> resolves to your server; use it as the domain in step F.
 
 In your DNS provider (registrar, Cloudflare, …) create:
 
@@ -142,10 +146,26 @@ sudo scripts/install-host.sh --dir /opt/burrow --ssh-port 22   # your SSH port; 
 ./burrow smoke
 ```
 
-### No domain? Simple mode
+### No domain?
+
+**Recommended: a free wildcard-DNS name.** `203-0-113-7.sslip.io` resolves to `203.0.113.7`,
+so Let's Encrypt can issue a real certificate and probes see a real website, exactly like
+with your own domain. Share links point at the IP, so phones never need that DNS service:
 
 ```bash
-# on the server:
+curl -fsSL https://raw.githubusercontent.com/deadboyccc/Burrow/main/install.sh |
+  sudo BURROW_DOMAIN=203-0-113-7.sslip.io BURROW_LINK_HOST=203.0.113.7 bash
+# or from your computer:
+./burrow deploy root@203.0.113.7 --domain 203-0-113-7.sslip.io --link-host 203.0.113.7
+```
+
+(Certificate renewals every ~60 days rely on sslip.io resolving. If it ever stops, move to
+a real domain with `./burrow config set DOMAIN …`.)
+
+**Last resort: simple mode.** It impersonates a popular site that is reachable where your
+users are:
+
+```bash
 curl -fsSL https://raw.githubusercontent.com/deadboyccc/Burrow/main/install.sh | sudo BURROW_COVER_DOMAIN=www.wikipedia.org bash
 # or from your computer:
 ./burrow deploy root@203.0.113.7 --mode simple --cover-domain www.wikipedia.org
@@ -177,7 +197,22 @@ nano site.local/index.html        # change titles, posts, wording; add pages or 
 ./burrow up                       # only the decoy container is recreated
 ```
 
-Keep it boring and plausible: a personal blog, a portfolio, a recipe collection.
+Already have a page? Upload it into `site.local/` from your computer, then apply:
+
+```bash
+scp -r mysite/* root@203.0.113.7:/opt/burrow/site.local/
+ssh root@203.0.113.7 /opt/burrow/burrow up
+```
+
+Rules for your pages:
+
+- CSS goes in files (`<link rel="stylesheet" href="/style.css">`). The site sends a strict
+  Content-Security-Policy that blocks `<style>` blocks, inline `style=""` and all scripts.
+  Images must come from the site itself.
+- Include a `404.html`; scanners love to probe `/wp-admin`.
+- Dotfiles (`.git`, `.DS_Store`) are skipped automatically.
+
+Keep it plausible: a personal blog, a portfolio, a recipe collection, a memorial page.
 `./burrow doctor` stops warning once `site.local/` exists.
 
 ## I. Connect your phone

@@ -21,6 +21,10 @@ re-running `burrow deploy`. Your secret is kept either way.
   pinned release, prepares the host, creates the secret, starts the proxy, runs the
   smoke test and prints the links and QR code. Re-running it upgrades in place and keeps
   the secret. `BURROW_DRY_RUN=1` previews every step.
+- Documented stealth mode without a domain: use your IP as a free wildcard-DNS name such as
+  `203-0-113-7.sslip.io`, and point links at the IP with `LINK_HOST`. You still get a real
+  certificate. Also documented the rules for custom decoy pages: CSS in files, because of
+  the strict Content-Security-Policy, and a `404.html`.
 
 ### Security
 

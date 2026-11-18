@@ -6,6 +6,21 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.4] - 2026-11-18
+
+### Changed
+
+- **Digby, redrawn from scratch** as a detailed illustration at four times the previous
+  resolution:
+  - dawn sky with sun rays, soft-edged clouds, and hills fading into the haze;
+  - a meadow with grass and flowers, and textured soil around a shadowed burrow;
+  - fur texture with rim lighting, glossy eyes and a highlighted nose;
+  - beveled brass goggles with glass reflections on a stitched leather strap;
+  - a knitted scarf streaming in the wind, and a shaded paper plane on a looping trail.
+
+  It is still a single scalable SVG (20 KB), and reads clearly from favicon size up. The
+  README and the website use it automatically.
+
 ## [1.1.3] - 2026-11-18
 
 A documentation release. The 500-line README is now a compact front page plus focused
@@ -220,7 +235,8 @@ First release. Digby the mole digs his first tunnel.
   release workflow with checksums, and a GitHub Pages site starring Digby.
 - Documentation: an in-depth README and an A-Z deployment guide (`docs/DEPLOY.md`).
 
-[Unreleased]: https://github.com/deadboyccc/Burrow/compare/v1.1.3...HEAD
+[Unreleased]: https://github.com/deadboyccc/Burrow/compare/v1.1.4...HEAD
+[1.1.4]: https://github.com/deadboyccc/Burrow/compare/v1.1.3...v1.1.4
 [1.1.3]: https://github.com/deadboyccc/Burrow/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/deadboyccc/Burrow/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/deadboyccc/Burrow/compare/v1.1.0...v1.1.1

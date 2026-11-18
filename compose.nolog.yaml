@@ -1,5 +1,6 @@
 # Overlay applied by ./burrow when LOGGING=off: no container logs at all.
-# mtg logs client IP addresses at info level; this keeps none of them.
+# By default mtg logs only warnings; a few of them (connection errors) include
+# the client's IP. This keeps nothing at all.
 services:
   mtg:
     logging: !override

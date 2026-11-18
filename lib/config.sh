@@ -320,7 +320,8 @@ MTG_MEMORY_LIMIT=$MTG_MEMORY_LIMIT
 DECOY_MEMORY_LIMIT=$DECOY_MEMORY_LIMIT
 
 # --- Observability ---------------------------------------------------------
-# off = no container logs at all (mtg logs client IPs at info level).
+# on = warnings only (a few connection errors include the client's IP).
+# off = no container logs at all. DEBUG=true logs every connection, with client IPs.
 LOGGING=$LOGGING
 DEBUG=$DEBUG
 EOF

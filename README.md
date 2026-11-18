@@ -307,7 +307,7 @@ The ones you are most likely to touch:
 | `BLOCKLIST_URLS` | FireHOL abusers + Spamhaus DROP | refreshed daily |
 | `LOCAL_BLOCKLIST` / `LOCAL_ALLOWLIST` | | your own netset files |
 | `DOPPELGANGER_URLS` | | HTTPS URLs whose timing mtg mimics (e.g. assets on your own site) |
-| `LOGGING` | `on` | `off` keeps **no** logs (mtg logs client IPs at info level) |
+| `LOGGING` | `on` | mtg logs warnings only: routine connections are never logged, and a client's IP appears only if its connection hits an error (e.g. Telegram unreachable). `off` keeps no logs at all |
 | `CONCURRENCY` | `8192` | max simultaneous client connections |
 
 **Make the decoy yours.** The shipped site is a template, and identical templates on many
@@ -356,8 +356,11 @@ Rules for your own pages:
 * **It can't hide that a server exists.** A sufficiently motivated censor can still block
   your IP. Have a plan B: another server, `LINK_HOST`, `UPSTREAM_PROXIES`.
 * **Anyone with the link can use the proxy.** Share accordingly; rotate if it leaks.
-* **The operator sees metadata.** With `LOGGING=on`, mtg logs client IPs. Use
-  `LOGGING=off` if you don't want that data to exist.
+* **The operator can see metadata.** In normal mode nothing records who connects: mtg
+  logs only warnings, and a client's IP appears only when its connection fails with an error
+  (for example when Telegram can't be reached). Anyone with root on the server can still see
+  live connections. `DEBUG=true` logs every connection with its IP; `LOGGING=off` keeps no
+  logs at all.
 
 ### Host hardening done by `scripts/install-host.sh`
 

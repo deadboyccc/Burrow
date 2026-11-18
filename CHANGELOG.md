@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The docs said mtg logs client IPs with `LOGGING=on`. In fact it logs only warnings:
+  routine connections are never logged, and a client's IP appears only in a few
+  connection-error warnings. `DEBUG=true` logs every connection with its IP.
+
 ## [1.1.1] - 2026-11-18
 
 A bug-fix release from a second, independent review of the whole code base. Upgrade by

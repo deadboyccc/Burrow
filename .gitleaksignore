@@ -1,0 +1,2 @@
+# Fake secrets in test fixtures, reviewed and allowed (fingerprint per finding).
+ab0f969864c260e4d4231234c6342400a8599575:tests/unit/cli.bats:generic-api-key:165

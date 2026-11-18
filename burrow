@@ -45,7 +45,9 @@ unset _path
 # main) is not an "unexpected failure".
 on_error() {
 	# shellcheck disable=SC2016 # matching the literal command text
-	[[ $3 == '"$fn" "$@"' ]] && return 0
+	case $3 in
+	'"$fn" "$@"' | return*) return 0 ;;
+	esac
 	say "${C_RED}burrow: '$3' failed (exit $1, line $2)${C_RESET}"
 }
 trap 'on_error $? $LINENO "$BASH_COMMAND"' ERR

@@ -11,6 +11,9 @@ setup_file() {
 	export FAKE_BIN=$BATS_FILE_TMPDIR/bin
 	mkdir -p "$FAKE_BIN"
 	ln -s "$BURROW_ROOT/tests/e2e/fake-ssh" "$FAKE_BIN/ssh"
+	# Non-root runs: keep BURROW_PROJECT across the "remote" sudo calls, so
+	# test stacks never share a Compose project.
+	ln -s "$BURROW_ROOT/tests/e2e/fake-sudo" "$FAKE_BIN/sudo"
 }
 
 teardown_file() {
@@ -28,8 +31,7 @@ setup() {
 	unset BURROW_ENV_FILE BURROW_STATE_DIR # the "server" uses its own install dir
 }
 
-# Matches deploy: commands run as root (directly, or via sudo, which drops BURROW_PROJECT).
-as_remote() { if ((EUID == 0)); then "$@"; else sudo -n "$@"; fi; }
+as_remote() { if ((EUID == 0)); then "$@"; else sudo -n env BURROW_PROJECT="$BURROW_PROJECT" "$@"; fi; }
 
 port() { (
 	# shellcheck source=/dev/null
@@ -38,7 +40,9 @@ port() { (
 ); }
 
 deploy() {
-	PATH=$FAKE_BIN:$PATH burrow deploy root@server.test --dir "$REMOTE_DIR" --no-host-setup "$@"
+	local args=("$@")
+	[[ " ${args[*]} " == *" --dir "* ]] || args=(--dir "$REMOTE_DIR" "${args[@]}")
+	PATH=$FAKE_BIN:$PATH burrow deploy root@server.test --no-host-setup "${args[@]}"
 }
 
 @test "first deploy: uploads, initialises on the server, starts, smoke-tests both ends" {
@@ -64,4 +68,25 @@ deploy() {
 	assert_success
 	assert_output --partial "keeping the existing configuration"
 	[[ $(as_remote grep '^SECRET=' "$REMOTE_DIR/.env") == "$before" ]]
+}
+
+@test "deploy stops, and says so, when the server cannot start the proxy" {
+	if ((EUID != 0)) && ! sudo -n true 2>/dev/null; then skip "needs root or passwordless sudo"; fi
+	local dir=$BATS_TEST_TMPDIR/failing/opt/burrow busy holder
+	busy=$(port)
+	# Hold the proxy port, so the server's `burrow up` cannot publish it.
+	python3 -c 'import socket, sys, time
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", int(sys.argv[1]))); s.listen(); time.sleep(600)' "$busy" &
+	holder=$!
+	sleep 0.5
+	BURROW_PROJECT=$BURROW_PROJECT-fail run deploy --dir "$dir" --no-local-smoke --domain fail.burrow.test \
+		--tls internal --bind 127.0.0.1 --port "$busy" --http-port "$(port)" --metrics-port "$(port)" \
+		--ipv4 127.0.0.1 --no-blocklist --subnet "$(random_subnet)"
+	kill "$holder" 2>/dev/null || true
+	BURROW_PROJECT=$BURROW_PROJECT-fail as_remote "$dir/burrow" down --volumes >/dev/null 2>&1 || true
+	if ((EUID != 0)); then sudo -n rm -rf -- "$BATS_TEST_TMPDIR/failing"; fi
+	assert_failure
+	assert_output --partial "did not start"
+	refute_output --partial "Deployed."
 }

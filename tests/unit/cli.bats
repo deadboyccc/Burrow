@@ -145,24 +145,9 @@ init_stealth() {
 	refute_output --partial "stopped"
 }
 
-@test "failures are failures: deploy stops when the server cannot start the proxy" {
-	mkdir -p "$BATS_TEST_TMPDIR/bin"
-	ln -s "$BURROW_ROOT/tests/e2e/fake-ssh" "$BATS_TEST_TMPDIR/bin/ssh"
-	printf '#!/bin/sh\necho "docker: broken" >&2\nexit 1\n' >"$BATS_TEST_TMPDIR/bin/docker"
-	chmod +x "$BATS_TEST_TMPDIR/bin/docker"
-	if ((EUID != 0)) && ! sudo -n true 2>/dev/null; then skip "needs root or passwordless sudo"; fi
-	unset BURROW_ENV_FILE BURROW_STATE_DIR
-	PATH=$BATS_TEST_TMPDIR/bin:$PATH run burrow deploy root@server.test --dir "$BATS_TEST_TMPDIR/srv/burrow" \
-		--no-host-setup --no-local-smoke --domain notes.example.org --ipv4 203.0.113.7
-	assert_failure
-	assert_output --partial "did not start"
-	refute_output --partial "Deployed."
-	if ((EUID != 0)); then sudo -n rm -rf -- "$BATS_TEST_TMPDIR/srv"; fi
-}
-
 @test "link errors never echo the secret" {
 	require_docker
-	run burrow smoke --link "tg://proxy?server=bad_host!&port=443&secret=ee0011223344556677889900aabbccddeeff"
+	run burrow smoke --link "tg://proxy?server=bad_host!&port=443&secret=ee0011223344556677889900aabbccddeeff" # gitleaks:allow (fake fixture)
 	assert_failure
 	refute_output --partial "ee0011223344556677889900"
 }

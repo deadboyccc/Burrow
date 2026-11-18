@@ -23,7 +23,7 @@
       }
     }
     * { box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
+    html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
     body {
       margin: 0; background: var(--bg); color: var(--ink);
       font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -48,7 +48,7 @@
     .btn.primary { background: var(--accent); color: var(--accent-ink); }
     .btn.ghost { color: var(--accent); }
 
-    pre { background: var(--code-bg); color: var(--code-ink); padding: 18px 20px; border-radius: 14px; overflow-x: auto; font: 14.5px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; margin: 0; }
+    pre { background: var(--code-bg); color: var(--code-ink); padding: 18px 20px; border-radius: 14px; overflow-x: auto; max-width: 100%; font: 14.5px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; margin: 0; }
     pre .c { color: #a8968a; }
     code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.92em; }
 
@@ -75,6 +75,10 @@
     .step { display: grid; grid-template-columns: 44px 1fr; gap: 14px; align-items: start; }
     .step::before { counter-increment: step; content: counter(step); width: 44px; height: 44px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font-weight: 800; }
     .step h3 { margin: 6px 0 8px; font-size: 18px; }
+    /* Grid items default to min-width: auto, so a long command would push the
+       column (and the whole page) wider than a phone screen. */
+    .step > div { min-width: 0; }
+    .step p { margin: 10px 0 0; }
 
     footer { padding: 36px 0 60px; color: var(--muted); font-size: 15px; border-top: 1px solid var(--rule); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 
@@ -85,6 +89,13 @@
       .flow { grid-template-columns: 1fr; }
       .arrow { transform: rotate(90deg); }
       nav a:not(.gh) { display: none; }
+      /* Wrap commands instead of clipping them; copying still gives the exact text. */
+      pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; padding: 14px 16px; border-radius: 12px; }
+      code { overflow-wrap: anywhere; }
+      .step { grid-template-columns: 34px 1fr; gap: 12px; }
+      .step::before { width: 34px; height: 34px; }
+      .hero p.lead { font-size: 18px; }
+      section { padding: 40px 0; }
     }
   </style>
 </head>

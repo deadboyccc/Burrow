@@ -100,6 +100,11 @@ ssh_ports() {
 		if command -v ss >/dev/null 2>&1; then
 			ss -Hltnp 2>/dev/null | awk '/"sshd"/ {n = split($4, a, ":"); print a[n]}'
 		fi
+		# Socket-activated SSH (ssh.socket) may hold the port in systemd alone.
+		if command -v systemctl >/dev/null 2>&1; then
+			systemctl show -p Listen ssh.socket sshd.socket 2>/dev/null |
+				grep -oE ':[0-9]+ \(Stream\)' | grep -oE '[0-9]+' || true
+		fi
 	} | grep -E '^[0-9]{1,5}$' | sort -un | paste -sd, - || true
 }
 SSH_PORTS=$(ssh_ports)
@@ -212,7 +217,7 @@ setup_firewall() {
 	log "firewall (ufw): allow SSH ${SSH_PORTS//,/, } (rate-limited) and ${PORTS//,/, }; deny other inbound"
 	if ! command -v ufw >/dev/null 2>&1; then
 		((APT)) || {
-			note "ufw is not available; configure your firewall to allow TCP $SSH_PORT,$PORTS"
+			note "ufw is not available; configure your firewall to allow TCP $SSH_PORTS,$PORTS"
 			return 0
 		}
 		apt_install ufw

@@ -42,6 +42,19 @@ def _report(result: probe.Result, args: argparse.Namespace, ok: bool) -> int:
     return 0 if ok else 1
 
 
+def _float_range(low: float, high: float) -> Callable[[str], float]:
+    def parse(text: str) -> float:
+        try:
+            value = float(text)
+        except ValueError:
+            raise argparse.ArgumentTypeError(f"not a number: {text!r}") from None
+        if not low <= value <= high:  # also rejects nan and inf
+            raise argparse.ArgumentTypeError(f"must be between {low} and {high}")
+        return value
+
+    return parse
+
+
 def _int_range(low: int, high: int) -> Callable[[str], int]:
     def parse(text: str) -> int:
         try:
@@ -147,9 +160,9 @@ def build_parser() -> argparse.ArgumentParser:
     def network(p: argparse.ArgumentParser, *, needs_secret: bool) -> None:
         p.add_argument("--host", required=True)
         p.add_argument("--port", type=_int_range(1, 65535), default=443)
-        p.add_argument("--timeout", type=float, default=10.0)
+        p.add_argument("--timeout", type=_float_range(0.1, 600), default=10.0)
         p.add_argument("--retries", type=_int_range(0, 1000), default=0, help="retry until the expectation holds")
-        p.add_argument("--retry-delay", type=float, default=1.0)
+        p.add_argument("--retry-delay", type=_float_range(0, 600), default=1.0)
         p.add_argument("--json", action="store_true")
         if needs_secret:
             p.add_argument("--secret", help="defaults to $BURROW_SECRET")

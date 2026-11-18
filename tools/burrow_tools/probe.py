@@ -15,8 +15,10 @@ Verdicts:
 ``error``
     Connection refused, timeout, DNS failure, and so on.
 
-Every probe gets one overall time budget (``timeout``), so a hostile server
-reached through ``burrow smoke --link`` cannot stall it.
+Every connection gets a bounded time budget (``timeout``) for connecting, and
+a fresh one of the same size for the exchange that follows, so a hostile
+server reached through ``burrow smoke --link`` cannot stall a probe. (The
+replay probe makes two connections, each with its own budget.)
 """
 
 from __future__ import annotations
@@ -68,13 +70,31 @@ class _Clock:
         return (time.perf_counter() - self.started) * 1000
 
 
-def _connect(host: str, port: int, deadline: Deadline) -> socket.socket:
-    left = deadline.remaining()
-    if left <= 0:
-        raise TimeoutError("probe time budget exhausted")
-    sock = socket.create_connection((host, port), timeout=left)
-    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-    return sock
+def _connect(host: str, port: int, timeout: float) -> socket.socket:
+    """Connect within ``timeout``, shared fairly by every resolved address.
+
+    ``socket.create_connection`` gives each address the full timeout in turn,
+    so one blackholed address (say an AAAA record whose port 443 is
+    firewalled) would use up the budget before the working one is tried.
+    """
+    deadline = Deadline(timeout)
+    infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    last_error: OSError = OSError(f"no addresses for {host}")
+    for index, (family, kind, proto, _name, address) in enumerate(infos):
+        left = deadline.remaining()
+        if left <= 0:
+            break
+        sock = socket.socket(family, kind, proto)
+        try:
+            sock.settimeout(left / (len(infos) - index))
+            sock.connect(address)
+        except OSError as exc:
+            sock.close()
+            last_error = exc
+            continue
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        return sock
+    raise last_error
 
 
 def _error(check: str, exc: BaseException, clock: _Clock) -> Result:
@@ -119,9 +139,10 @@ def faketls_probe(
     time_offset: int = 0,
 ) -> Result:
     """One FakeTLS handshake; ``time_offset`` simulates client clock skew."""
-    clock, deadline = _Clock(), Deadline(timeout)
+    clock = _Clock()
     try:
-        with _connect(host, port, deadline) as sock:
+        with _connect(host, port, timeout) as sock:
+            deadline = Deadline(timeout)
             hello, client_random = faketls.build_client_hello(
                 secret.key, secret.host, timestamp=int(time.time()) + time_offset
             )
@@ -138,8 +159,8 @@ def replay_probe(host: str, port: int, secret: Secret, *, timeout: float = 10.0)
     verdicts = []
     try:
         for _ in range(2):
-            deadline = Deadline(timeout)
-            with _connect(host, port, deadline) as sock:
+            with _connect(host, port, timeout) as sock:
+                deadline = Deadline(timeout)
                 verdicts.append(_handshake(sock, secret.key, hello, client_random, deadline)[0])
     except OSError as exc:
         return _error("replay", exc, clock)
@@ -164,10 +185,11 @@ def telegram_probe(
     timeout: float = 15.0,
 ) -> Result:
     """Full path: FakeTLS → obfuscated2 → Telegram DC → resPQ back."""
-    clock, deadline = _Clock(), Deadline(timeout)
+    clock = _Clock()
     try:
         stream = ObfuscatedStream(secret.key, dc=dc)
-        with _connect(host, port, deadline) as sock:
+        with _connect(host, port, timeout) as sock:
+            deadline = Deadline(timeout)
             hello, client_random = faketls.build_client_hello(secret.key, secret.host)
             verdict, detail = _handshake(sock, secret.key, hello, client_random, deadline)
             if verdict != PROXY:
@@ -228,7 +250,7 @@ def https_probe(
     timeout: float = 10.0,
 ) -> Result:
     """What a browser or censor sees: a real TLS handshake plus an HTTP GET."""
-    clock, deadline = _Clock(), Deadline(timeout)
+    clock = _Clock()
     request = (
         f"GET {path} HTTP/1.1\r\nHost: {sni}\r\n"
         "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko)\r\n"
@@ -241,12 +263,15 @@ def https_probe(
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
         context.set_alpn_protocols(["http/1.1"])
-        with _connect(host, port, deadline) as raw, context.wrap_socket(raw, server_hostname=sni) as tls:
-            cert = tls.getpeercert() or {}
-            tls_version = tls.version()
-            deadline.apply(tls)
-            tls.sendall(request)
-            response = _read_until_close(tls, deadline, MAX_HTTP_RESPONSE)
+        with _connect(host, port, timeout) as raw:
+            deadline = Deadline(timeout)
+            deadline.apply(raw)  # the TLS handshake in wrap_socket counts too
+            with context.wrap_socket(raw, server_hostname=sni) as tls:
+                cert = tls.getpeercert() or {}
+                tls_version = tls.version()
+                deadline.apply(tls)
+                tls.sendall(request)
+                response = _read_until_close(tls, deadline, MAX_HTTP_RESPONSE)
     except ssl.SSLCertVerificationError as exc:
         return Result("https", ERROR, f"certificate rejected: {exc.verify_message}", clock.ms())
     except OSError as exc:  # includes ssl.SSLError, timeouts and a bad --cafile
@@ -272,9 +297,10 @@ def https_probe(
 
 def plaintext_probe(host: str, port: int, *, timeout: float = 10.0) -> Result:
     """Send plain HTTP to the TLS port, as lazy scanners do."""
-    clock, deadline = _Clock(), Deadline(timeout)
+    clock = _Clock()
     try:
-        with _connect(host, port, deadline) as sock:
+        with _connect(host, port, timeout) as sock:
+            deadline = Deadline(timeout)
             deadline.apply(sock)
             sock.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
             response = _read_until_close(sock, deadline, MAX_PLAINTEXT_RESPONSE)

@@ -160,6 +160,68 @@ init_stealth() {
 	refute_output --partial "Docker daemon"
 }
 
+@test "--help never runs the command (uninstall, rotate, up, down)" {
+	init_stealth
+	burrow render >/dev/null
+	before=$(<"$BURROW_ENV_FILE")
+	for cmd in uninstall rotate up down status doctor share watchdog try update restart render; do
+		run burrow "$cmd" --help
+		assert_success
+		assert_output --partial "Usage: burrow"
+	done
+	[[ $(<"$BURROW_ENV_FILE") == "$before" ]]
+	[[ -d $BURROW_STATE_DIR ]]
+}
+
+@test "commands reject arguments they don't understand" {
+	init_stealth
+	for args in "up --bogus" "down --purge" "rotate now" "uninstall --volumes" "status x"; do
+		# shellcheck disable=SC2086 # word splitting intended
+		run burrow $args
+		assert_failure
+		assert_output --partial "unknown argument"
+	done
+}
+
+@test "rotate refuses to run unattended without --yes" {
+	init_stealth
+	before=$(burrow config get SECRET)
+	run burrow rotate </dev/null
+	assert_failure
+	assert_output --partial "--yes"
+	[[ $(burrow config get SECRET) == "$before" ]]
+}
+
+@test "config set leaves no copy of the secret behind on failure" {
+	init_stealth
+	printf 'garbage line\n' >>"$BURROW_ENV_FILE"
+	run burrow config set LOGGING off
+	assert_failure
+	run find "$(dirname "$BURROW_ENV_FILE")" -maxdepth 1 -name '.env.*'
+	assert_output ""
+}
+
+@test "status before the first up explains instead of failing obscurely" {
+	require_docker
+	init_stealth
+	run burrow status
+	assert_failure
+	assert_output --partial "has not been started here yet"
+	refute_output --partial "failed (exit"
+}
+
+@test "paths with quotes or backslashes are refused" {
+	run env BURROW_STATE_DIR="$BATS_TEST_TMPDIR/bad\\" "$BURROW_ROOT/burrow" version
+	assert_failure
+	assert_output --partial "unsupported characters"
+}
+
+@test "attacker-controlled link fields never reach the terminal raw" {
+	run burrow smoke --link 'tg://proxy?server=x%1b]0;pwned%07%0dall-good&port=443&secret=ee00'
+	assert_failure
+	[[ $output != *$'\e'* && $output != *$'\r'* ]]
+}
+
 @test "link errors never echo the secret" {
 	require_docker
 	run burrow smoke --link "tg://proxy?server=bad_host!&port=443&secret=ee0011223344556677889900aabbccddeeff" # gitleaks:allow (fake fixture)

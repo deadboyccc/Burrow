@@ -103,7 +103,7 @@ in_debian() {
 		-e BURROW_SSH_PORT=2222 "$DEBIAN_IMAGE" bash /burrow/install.sh
 	assert_success
 	assert_output --partial "apt-get install -y -qq --no-install-recommends git curl ca-certificates"
-	assert_output --partial "clone --quiet --depth 1 --branch v"
+	assert_output --partial "git clone --depth 1 --branch v"
 	assert_output --partial "install-host.sh --dir /opt/burrow --ports 80,443 --ssh-port 2222"
 	assert_output --partial "burrow init --port 443 --quiet --domain notes.example.org --email you@example.com"
 	assert_output --partial "/opt/burrow/burrow up"
@@ -117,4 +117,15 @@ in_debian() {
 	assert_output --partial "--ports 443"
 	refute_output --partial "--ports 80,443"
 	assert_output --partial "init --port 443 --quiet --mode simple --cover-domain www.wikipedia.org"
+}
+
+@test "install.sh: 'true' means true for dry runs and skipping host setup" {
+	run in_debian -e BURROW_DRY_RUN=true -e BURROW_SKIP_HOST_SETUP=yes -e BURROW_DOMAIN=notes.example.org \
+		"$DEBIAN_IMAGE" bash /burrow/install.sh
+	assert_success
+	assert_output --partial "DRY RUN: nothing will be changed"
+	assert_output --partial "host preparation skipped"
+	refute_output --partial "install-host.sh"
+	assert_output --partial "Dry run complete: nothing was changed"
+	refute_output --partial "Done. burrow is running"
 }

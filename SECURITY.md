@@ -14,14 +14,15 @@ needs to pick up their fix, tell us too.
 
 ## Scope
 
-In scope: the `burrow` CLI and `lib/`, the compose files, `scripts/install-host.sh`, the
+In scope: the `burrow` CLI and `lib/`, `install.sh`, the compose files, `scripts/install-host.sh`, the
 systemd units, the burrow-tools image, and the defaults they ship with. For example: secret
 leakage, command injection through configuration, a weaker-than-documented container
 sandbox, or a fingerprint that singles out burrow deployments.
 
 ## Supported versions
 
-Only the latest release receives fixes. Upgrade with `git pull && ./burrow up`.
+Only the latest release receives fixes. Upgrade by re-running the one-command installer
+(or `burrow deploy` from your computer); in a git clone, `git pull && ./burrow up`.
 
 ## Handling your secret
 

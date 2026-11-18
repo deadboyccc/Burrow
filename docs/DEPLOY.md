@@ -177,8 +177,12 @@ server's IP.
 
 ## G. Verify it works
 
+> From here on, `./burrow …` means: on the server, in the install directory. Run
+> `ssh root@203.0.113.7` and then `cd /opt/burrow` first, or call `/opt/burrow/burrow …`
+> directly.
+
 1. **On the server:** `./burrow smoke` should print `all 8 checks passed`.
-2. **From your computer:**
+2. **From your computer** (in your local clone of burrow, with Docker):
    `./burrow smoke --link 'tg://proxy?server=…'` (paste your link) should pass all checks.
 3. **In a browser:** open `https://notes.example.com`. You should see an ordinary notes
    website with a valid padlock. That is what everyone except Telegram sees.
@@ -208,7 +212,7 @@ Rules for your pages:
 
 - CSS goes in files (`<link rel="stylesheet" href="/style.css">`). The site sends a strict
   Content-Security-Policy that blocks `<style>` blocks, inline `style=""` and all scripts.
-  Images must come from the site itself.
+  Images and fonts must come from the site itself.
 - Include a `404.html`; scanners love to probe `/wp-admin`.
 - Dotfiles (`.git`, `.DS_Store`) are skipped automatically.
 
@@ -267,7 +271,7 @@ Certificates renew themselves. Security updates install themselves.
 |---|---|
 | The **IP** is blocked for your users | New server (step L). Links keep working if they use the domain. |
 | The **domain** is DNS-poisoned | `./burrow config set LINK_HOST 203.0.113.7 && ./burrow up`, then share new links. |
-| Telegram is blocked **from the server** | `./burrow config set UPSTREAM_PROXIES socks5://127.0.0.1:1080` (a local sing-box/WireGuard egress), `./burrow up`. |
+| Telegram is blocked **from the server** | Run a SOCKS5 egress (sing-box, a WireGuard client, …) on the server, listening on the Docker bridge gateway `10.203.47.1` (the first address of `EDGE_SUBNET`; mtg runs in a container, so `127.0.0.1` would be the container itself). Then: `./burrow config set UPSTREAM_PROXIES socks5://10.203.47.1:1080 && ./burrow up`. |
 | Probes still find it | Make the decoy richer (step H), add `DOPPELGANGER_URLS` with assets from your own site, keep port 443. |
 
 ## N. Uninstall

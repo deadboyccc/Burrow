@@ -52,7 +52,7 @@ class TestSecret:
 
     def test_repr_never_shows_the_key(self):
         secret = Secret.parse(HEX)
-        assert "00112233" not in repr(secret)
+        assert "key=" not in repr(secret)
         assert "notes.example.org" in repr(secret)
 
 

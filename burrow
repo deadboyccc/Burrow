@@ -35,7 +35,7 @@ STATE_DIR=${BURROW_STATE_DIR:-$BURROW_ROOT/state}
 BURROW_PROJECT=${BURROW_PROJECT:-burrow}
 # These paths end up quoted in compose.env and in systemd units.
 for _path in "$BURROW_ROOT" "$STATE_DIR" "$ENV_FILE"; do
-	[[ $_path != *[$'\n\r'\'\"]* ]] || die "unsupported characters (quotes or newlines) in path: $_path"
+	[[ $_path != *[$'\n\r'\'\"\\]* ]] || die "unsupported characters (quotes, backslashes or newlines) in path: $(printf '%q' "$_path")"
 done
 unset _path
 [[ $BURROW_PROJECT =~ ^[a-z0-9][a-z0-9_-]*$ ]] || die "BURROW_PROJECT must be lowercase letters, digits, - and _"
@@ -51,6 +51,17 @@ on_error() {
 	say "${C_RED}burrow: '$3' failed (exit $1, line $2)${C_RESET}"
 }
 trap 'on_error $? $LINENO "$BASH_COMMAND"' ERR
+
+# allow_flags "FLAGS" ARGS...: die on any argument not in FLAGS. Commands
+# never ignore what they don't understand (`uninstall --help` once ran the
+# uninstall).
+allow_flags() {
+	local allowed=" $1 " arg
+	shift
+	for arg in "$@"; do
+		[[ $allowed == *" $arg "* ]] || die "unknown argument: $(printf '%q' "$arg") (see ./burrow help)"
+	done
+}
 
 load_config() {
 	config_load "$ENV_FILE"
@@ -219,7 +230,9 @@ check_project_owner() {
        burrow runs one proxy per server: stop that one first (./burrow down there)."
 }
 
+# shellcheck disable=SC2120 # cmd_try also calls it without arguments
 cmd_up() {
+	allow_flags "--no-wait" "$@"
 	local wait=1
 	[[ ${1-} == --no-wait ]] && wait=0
 	load_config
@@ -243,6 +256,7 @@ cmd_up() {
 }
 
 cmd_down() {
+	allow_flags "--volumes" "$@"
 	local args=()
 	[[ ${1-} == --volumes ]] && args=(--volumes)
 	config_load "$ENV_FILE"
@@ -252,6 +266,7 @@ cmd_down() {
 }
 
 cmd_restart() {
+	allow_flags "" "$@"
 	load_config
 	render_all
 	compose restart
@@ -264,6 +279,7 @@ cmd_logs() {
 }
 
 cmd_update() {
+	allow_flags "" "$@"
 	load_config
 	require_docker
 	render_all
@@ -306,8 +322,13 @@ metrics_summary() {
 }
 
 cmd_status() {
+	allow_flags "" "$@"
 	load_config
 	require_docker
+	if [[ ! -f $STATE_DIR/compose.env ]]; then
+		warn "burrow has not been started here yet. Start it with: ./burrow up"
+		return 1
+	fi
 	info "containers"
 	compose ps >&2
 	if ! stack_running; then
@@ -360,7 +381,9 @@ cmd_link() {
 	esac
 }
 
+# shellcheck disable=SC2120 # cmd_try also calls it without arguments
 cmd_share() {
+	allow_flags "" "$@"
 	load_config
 	require_docker
 	ensure_tools_image
@@ -380,10 +403,15 @@ cmd_share() {
 }
 
 cmd_rotate() {
+	allow_flags "--yes -y" "$@"
 	local yes=0
 	[[ ${1-} == --yes || ${1-} == -y ]] && yes=1
 	config_load "$ENV_FILE"
-	if ((yes == 0)) && [[ -t 0 ]]; then
+	# Rotation revokes every shared link: never do it without a yes.
+	if ((yes == 0)) && [[ ! -t 0 ]]; then
+		die "rotating revokes every shared link; to do it without a prompt, pass --yes"
+	fi
+	if ((yes == 0)); then
 		printf 'Rotating the secret disconnects everyone using the current link. Continue? [y/N] ' >&2
 		local answer
 		read -r answer
@@ -441,8 +469,12 @@ cmd_config() {
 			[[ ${pairs[i + 1]} != *[$'\n\r'\"\']* ]] || die "values must not contain newlines or quotes"
 		done
 		# Apply to a private draft; it replaces .env only if the result is valid.
-		local draft new_secret=0
-		draft=$(mktemp "$ENV_FILE.XXXXXX")
+		config_load "$ENV_FILE" # a broken .env fails here, before any copy exists
+		local new_secret=0
+		# The draft holds the secret: remove it however this command ends.
+		CONFIG_DRAFT=$(mktemp "$ENV_FILE.XXXXXX")
+		trap 'rm -f -- "${CONFIG_DRAFT:-}"' EXIT
+		local draft=$CONFIG_DRAFT
 		cat -- "$ENV_FILE" >"$draft"
 		for ((i = 0; i < ${#pairs[@]}; i += 2)); do
 			config_set_value "$draft" "${pairs[i]}" "${pairs[i + 1]}"
@@ -472,6 +504,7 @@ cmd_config() {
 }
 
 cmd_render() {
+	allow_flags "" "$@"
 	load_config
 	render_all
 	ok "rendered into $STATE_DIR"
@@ -481,6 +514,7 @@ cmd_render() {
 # doctor
 
 cmd_doctor() {
+	allow_flags "" "$@"
 	local problems=0
 	info "host"
 	if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
@@ -571,7 +605,7 @@ cmd_doctor() {
 
 usage_smoke() {
 	cat >&2 <<'EOF'
-Usage: burrow smoke [--no-telegram]
+Usage: burrow smoke [--no-telegram] [--insecure]
        burrow smoke --link 'tg://proxy?server=...&port=...&secret=...' [--insecure] [--no-telegram]
 
 Without --link: tests the local stack from inside its Docker network.
@@ -596,8 +630,9 @@ parse_link() { # sets LINK_SERVER LINK_PORT LINK_SECRET
 	done
 	[[ -n $LINK_SERVER && -n $LINK_PORT && -n $LINK_SECRET ]] ||
 		die "not a proxy link (expected tg://proxy?server=...&port=...&secret=...)"
-	is_port "$LINK_PORT" || die "bad port in link: $LINK_PORT"
-	{ is_hostname "$LINK_SERVER" || is_ip "$LINK_SERVER"; } || die "bad server in link: $LINK_SERVER"
+	# %q: link values are attacker-controlled and must not reach the terminal raw.
+	is_port "$LINK_PORT" || die "bad port in link: $(printf '%q' "$LINK_PORT")"
+	{ is_hostname "$LINK_SERVER" || is_ip "$LINK_SERVER"; } || die "bad server in link: $(printf '%q' "$LINK_SERVER")"
 	# Links carry the secret as hex (ee…) or base64; mtg itself prints base64.
 	LINK_SECRET=$(secret_normalize "$LINK_SECRET") ||
 		die "the link does not carry a FakeTLS secret (ee… in hex, or its base64 form)"
@@ -690,6 +725,7 @@ cmd_smoke() {
 # watchdog (run by the systemd timer from scripts/install-host.sh)
 
 cmd_watchdog() {
+	allow_flags "" "$@"
 	if [[ ! -f $ENV_FILE ]]; then
 		say "burrow is not configured here yet; nothing to watch"
 		return 0
@@ -702,27 +738,25 @@ cmd_watchdog() {
 	fi
 	ensure_tools_image || die "burrow watchdog: cannot build the probe image; leaving the proxy alone"
 
-	# Only a failed verdict (exit 1) means the proxy is unhealthy. Anything
-	# else is the probe itself failing, and restarting mtg would just drop
-	# every user for nothing.
-	local timeout=${BURROW_WATCHDOG_TIMEOUT:-10} rc=0
-	tools_in_stack probe --host mtg --port 3128 --retries 2 --retry-delay 5 --timeout "$timeout" >/dev/null 2>&1 || rc=$?
-	case $rc in
-	0) say "burrow watchdog: proxy healthy" ;;
-	1)
+	# Restart only on the probe's own verdict ("FAIL faketls: …"). A non-zero
+	# exit can also come from docker compose or the probe tool breaking, and
+	# restarting mtg then would just drop every user for nothing.
+	local timeout=${BURROW_WATCHDOG_TIMEOUT:-10} out
+	if out=$(tools_in_stack probe --host mtg --port 3128 --retries 2 --retry-delay 5 --timeout "$timeout" 2>&1); then
+		say "burrow watchdog: proxy healthy"
+	elif [[ $out == *"FAIL faketls:"* ]]; then
 		say "burrow watchdog: FakeTLS probe failed 3 times, restarting mtg"
 		if command -v logger >/dev/null 2>&1; then logger -t burrow "watchdog restarted mtg"; fi
 		compose up --detach --force-recreate --no-deps mtg
 		tools_in_stack probe --host mtg --port 3128 --retries 20 --retry-delay 1 >/dev/null 2>&1 ||
 			die "burrow watchdog: mtg is still unhealthy after a restart"
-		;;
-	*) die "burrow watchdog: the probe itself failed (exit $rc); leaving the proxy alone" ;;
-	esac
+	else
+		die "burrow watchdog: the probe itself failed; leaving the proxy alone. Output: ${out:0:300}"
+	fi
 
 	if [[ $BURROW_MODE == stealth ]]; then
-		rc=0
-		tools_in_stack https --host mtg --port 3128 --sni "$DOMAIN" --insecure --retries 2 --retry-delay 5 >/dev/null 2>&1 || rc=$?
-		if ((rc == 1)); then
+		if ! out=$(tools_in_stack https --host mtg --port 3128 --sni "$DOMAIN" --insecure --retries 2 --retry-delay 5 2>&1) &&
+			[[ $out == *"FAIL https:"* ]]; then
 			say "burrow watchdog: decoy website unreachable, restarting it"
 			compose up --detach --force-recreate --no-deps decoy
 		fi
@@ -733,6 +767,7 @@ cmd_watchdog() {
 # try: a throwaway local instance
 
 cmd_try() {
+	allow_flags "--down" "$@"
 	ENV_FILE=$BURROW_ROOT/.try/.env
 	STATE_DIR=$BURROW_ROOT/.try/state
 	BURROW_PROJECT=burrow-try
@@ -757,8 +792,10 @@ cmd_try() {
 			--ipv4 127.0.0.1 --link-host 127.0.0.1 --no-blocklist --quiet \
 			--subnet 10.203.48.0/28 # its own subnet, so a trial can run next to a real deployment
 	fi
+	# shellcheck disable=SC2119
 	cmd_up
 	cmd_smoke
+	# shellcheck disable=SC2119
 	cmd_share
 	say ""
 	say "${C_BOLD}Try it:${C_RESET} open the app link above in Telegram Desktop on ${C_BOLD}this machine${C_RESET}"
@@ -917,6 +954,7 @@ cmd_deploy() {
 # uninstall
 
 cmd_uninstall() {
+	allow_flags "--purge" "$@"
 	local purge=0
 	[[ ${1-} == --purge ]] && purge=1
 	if [[ -f $ENV_FILE ]]; then
@@ -970,9 +1008,34 @@ Environment: BURROW_ENV_FILE, BURROW_STATE_DIR, BURROW_PROJECT, NO_COLOR
 EOF
 }
 
+# Usage for commands without a usage_<command> function of their own.
+command_usage() {
+	case $1 in
+	up | start) say "Usage: burrow up [--no-wait]" ;;
+	down | stop) say "Usage: burrow down [--volumes]   (--volumes also deletes the certificate volume)" ;;
+	rotate) say "Usage: burrow rotate [--yes]   (new secret: every shared link stops working)" ;;
+	uninstall) say "Usage: burrow uninstall [--purge]   (--purge also deletes .env and its secret)" ;;
+	try) say "Usage: burrow try [--down]" ;;
+	logs) say "Usage: burrow logs [-f] [--tail N] [mtg|decoy]" ;;
+	config) say "Usage: burrow config [show | get KEY | set KEY VALUE [KEY VALUE ...]]" ;;
+	*) say "Usage: burrow $1   (takes no arguments; see ./burrow help)" ;;
+	esac
+}
+
 main() {
-	local cmd=${1:-help} fn
+	local cmd=${1:-help} fn arg
 	shift || true
+	# `--help` anywhere prints usage and runs nothing.
+	for arg in "$@"; do
+		if [[ $arg == -h || $arg == --help ]]; then
+			case $cmd in
+			init | link | smoke | deploy) "usage_$cmd" ;;
+			help | version | --version | -v | --help | -h) usage ;;
+			*) command_usage "$cmd" ;;
+			esac
+			return 0
+		fi
+	done
 	case $cmd in
 	init | up | down | restart | status | logs | link | share | rotate | config | render | doctor | smoke | watchdog | update | try | deploy | uninstall)
 		fn=cmd_$cmd

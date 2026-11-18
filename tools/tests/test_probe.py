@@ -20,11 +20,15 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
 from burrow_tools import faketls, probe
+from burrow_tools.__main__ import main
 from burrow_tools.secret import Secret
 
 from .mtg_reference import ServerObfuscation, app_record, check_client_hello, res_pq_packet, server_flight
 
 SECRET = Secret(key=bytes(range(16)), host="notes.example.org")
+
+# Set when a test ends, so handlers that "hang" release their thread promptly.
+STOP = threading.Event()
 
 
 class Server:
@@ -49,7 +53,11 @@ class Server:
                 self.handler(conn)
 
     def close(self) -> None:
+        # shutdown() wakes the thread blocked in accept(); close() alone does not.
+        with contextlib.suppress(OSError):
+            self.sock.shutdown(socket.SHUT_RDWR)
         self.sock.close()
+        self.thread.join(timeout=5)
 
 
 def read_hello(conn: socket.socket) -> bytes:
@@ -79,6 +87,7 @@ def fake_mtg(seen: set[bytes] | None = None) -> Callable[[socket.socket], None]:
 @pytest.fixture
 def server(request):
     servers = []
+    STOP.clear()
 
     def start(handler):
         srv = Server(handler)
@@ -86,6 +95,7 @@ def server(request):
         return srv
 
     yield start
+    STOP.set()
     for srv in servers:
         srv.close()
 
@@ -296,7 +306,7 @@ def test_partial_flight_then_silence_is_fronted_quickly(server):
         read_hello(conn)
         body = b"\x02\x00\x00\x46\x03\x03" + bytes(70)
         conn.sendall(b"\x16\x03\x03" + struct.pack(">H", len(body)) + body + b"\x14\x03\x03\x00\x01\x01")
-        time.sleep(8)
+        STOP.wait(8)
 
     srv = server(hello_retry_and_wait)
     started = time.monotonic()
@@ -372,7 +382,7 @@ def test_plaintext_keeps_the_answer_when_the_server_then_resets(server):
 
 
 def test_plaintext_server_that_keeps_the_connection_open(server):
-    srv = http_server(server, b"HTTP/1.1 400 Bad Request\r\n\r\n", then=lambda c: time.sleep(5))
+    srv = http_server(server, b"HTTP/1.1 400 Bad Request\r\n\r\n", then=lambda c: STOP.wait(5))
     started = time.monotonic()
     result = probe.plaintext_probe("127.0.0.1", srv.port, timeout=1)
     assert result.verdict == probe.FRONTED
@@ -387,7 +397,7 @@ def test_https_keep_alive_response_counts(server, tls_cert):
         with context.wrap_socket(conn, server_side=True) as tls:
             tls.recv(4096)
             tls.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
-            time.sleep(5)  # ignores Connection: close
+            STOP.wait(5)  # ignores Connection: close
 
     srv = server(handler)
     result = probe.https_probe("127.0.0.1", srv.port, SECRET.host, insecure=True, timeout=1.5)
@@ -434,9 +444,52 @@ def test_cli_neutralises_terminal_escapes(server):
         ],
         env=env,
         check=False,
-        capture_output=True,
-        text=True,
+        capture_output=True,  # bytes: text mode would turn \r into \n
     )
     assert out.returncode == 1
-    assert "\x1b" not in out.stdout and "\r" not in out.stdout
-    assert out.stdout.startswith("FAIL plaintext:")
+    assert b"\x1b" not in out.stdout and b"\r" not in out.stdout
+    assert out.stdout.startswith(b"FAIL plaintext:")
+
+
+@pytest.fixture
+def blackhole():
+    """An address whose connects hang: a listener with a full accept queue."""
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(0)
+    fillers = []
+    for _ in range(3):
+        filler = socket.socket()
+        filler.setblocking(False)
+        with contextlib.suppress(BlockingIOError):
+            filler.connect(listener.getsockname())
+        fillers.append(filler)
+    time.sleep(0.2)
+    yield listener.getsockname()
+    for sock in [*fillers, listener]:
+        sock.close()
+
+
+def test_a_blackholed_address_cannot_use_up_the_connect_budget(server, blackhole, monkeypatch):
+    """Like an AAAA record whose port 443 is firewalled, listed before a working A record."""
+    srv = server(fake_mtg())
+    real = socket.getaddrinfo
+
+    def two_addresses(host, port, *args, **kwargs):
+        live = real("127.0.0.1", srv.port, *args, **kwargs)[0]
+        dead = (live[0], live[1], live[2], live[3], blackhole)
+        return [dead, live]
+
+    monkeypatch.setattr(socket, "getaddrinfo", two_addresses)
+    started = time.monotonic()
+    result = probe.faketls_probe("proxy.invalid", srv.port, SECRET, timeout=2)
+    assert result.verdict == probe.PROXY, result.detail
+    assert time.monotonic() - started < 3
+
+
+@pytest.mark.parametrize("flag", ["--timeout", "--retry-delay"])
+@pytest.mark.parametrize("value", ["inf", "nan", "-1", "1e10"])
+def test_time_arguments_are_bounded(flag, value):
+    with pytest.raises(SystemExit) as exc:
+        main(["probe", "--host", "127.0.0.1", flag, value])
+    assert exc.value.code == 2

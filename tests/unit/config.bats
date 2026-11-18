@@ -214,3 +214,24 @@ write_env() { printf '%s\n' "$@" >"$ENV_FILE"; }
 	run redact_userinfo "socks5://user:pa55@10.0.0.2:1080 socks5://10.0.0.3:1080"
 	assert_output "socks5://***@10.0.0.2:1080 socks5://10.0.0.3:1080"
 }
+
+@test "validate: IPv6 cannot be combined with a specific BIND_ADDR" {
+	stealth_config
+	ENABLE_IPV6=true BIND_ADDR=203.0.113.7
+	run config_validate
+	assert_failure
+	assert_output --partial "ENABLE_IPV6=true"
+	BIND_ADDR=0.0.0.0
+	run config_validate
+	assert_success
+}
+
+@test "load: simple mode re-derives a DECOY_IP left outside a changed subnet" {
+	secret=$(secret_new www.example.com)
+	write_env "BURROW_MODE=simple" "COVER_DOMAIN=www.example.com" "PUBLIC_IPV4=198.51.100.2" \
+		"SECRET=$secret" "EDGE_SUBNET=10.77.1.0/28" "DECOY_IP=10.203.47.10"
+	config_load "$ENV_FILE"
+	[[ $DECOY_IP == 10.77.1.10 ]]
+	run config_validate
+	assert_success
+}

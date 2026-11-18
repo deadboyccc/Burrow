@@ -15,8 +15,10 @@ setup_file() {
 	mkdir -p "$WORK/repo"
 	git -C "$BURROW_ROOT" archive HEAD | tar -x -C "$WORK/repo"
 	git -C "$WORK/repo" init -q -b e2e
+	# The first "release" ships an extra page that the second one drops.
+	printf 'retired\n' >"$WORK/repo/site/retired.html"
 	git -C "$WORK/repo" add -A
-	git -C "$WORK/repo" -c user.name=burrow-tests -c user.email=tests@burrow.invalid commit -q -m "commit under test"
+	git -C "$WORK/repo" -c user.name=burrow-tests -c user.email=tests@burrow.invalid commit -q -m "release one"
 }
 
 teardown_file() {
@@ -32,6 +34,8 @@ setup() {
 	load ../helpers
 	require_docker
 	if ((EUID != 0)) && ! sudo -n true 2>/dev/null; then skip "needs root or passwordless sudo"; fi
+	# The installer always runs the full smoke test, Telegram round trip included.
+	[[ ${BURROW_E2E_OFFLINE:-0} != 1 ]] || skip "needs the internet (Telegram)"
 	unset BURROW_ENV_FILE BURROW_STATE_DIR
 }
 
@@ -62,10 +66,21 @@ install_burrow() {
 
 @test "running it again upgrades in place and keeps the secret" {
 	[[ -f $REMOTE_DIR/.env ]] || skip "the first install did not run"
+	[[ -f $REMOTE_DIR/site/retired.html ]]
+	# Release two drops the page.
+	git -C "$WORK/repo" rm -q site/retired.html
+	git -C "$WORK/repo" -c user.name=burrow-tests -c user.email=tests@burrow.invalid commit -q -m "release two"
 	before=$(as_root grep '^SECRET=' "$REMOTE_DIR/.env")
 	run install_burrow BURROW_DOMAIN=install.burrow.test
 	assert_success
 	assert_output --partial "keeping the existing configuration and secret"
 	assert_output --partial "all 8 checks passed"
 	[[ $(as_root grep '^SECRET=' "$REMOTE_DIR/.env") == "$before" ]]
+	# The dropped page is gone, from the install and from the published site.
+	[[ ! -e $REMOTE_DIR/site/retired.html ]]
+	run as_root find "$REMOTE_DIR/state/site" -name retired.html
+	assert_output ""
+	# Root-run code is never group- or world-writable.
+	run as_root find "$REMOTE_DIR/burrow" "$REMOTE_DIR/lib" "$REMOTE_DIR/scripts" -perm /022
+	assert_output ""
 }

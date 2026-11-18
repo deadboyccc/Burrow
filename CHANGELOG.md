@@ -6,14 +6,62 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-18
+
+A bug-fix release from a second, independent review of the whole code base. Upgrade by
+re-running the installer (or `burrow deploy`). Your secret and links are kept.
+
 ### Fixed
 
+- **Changing the decoy site made every page unreadable (HTTP 403).** Files synced into
+  a running site lost their read permission for the unprivileged web server. That happened
+  after editing `site.local/`, changing the domain, or on January 1st (the year in the
+  footer). Sites now stay readable, never go empty during a sync, and a symlinked site
+  directory is refused.
+- **`burrow <command> --help` ran the command** for most commands: `uninstall --help`
+  uninstalled, and `rotate --help` replaced the secret. `--help` now only prints usage,
+  and every command rejects arguments it doesn't know. `rotate` without a terminal
+  requires `--yes`.
+- Installer:
+  - `BURROW_DRY_RUN` and `BURROW_SKIP_HOST_SETUP` failed open on values like `true`.
+    They now accept 1/true/yes and 0/false/no, and reject anything else.
+  - Upgrades remove files that a release dropped.
+  - Upgrades install code with 0755/0644 modes, never group-writable.
+  - Re-runs take firewall ports from the existing configuration, and report requested
+    settings that differ instead of silently ignoring them.
+  - Dry runs preview the real host plan and say "Dry run complete".
 - `burrow smoke --link` accepts links whose secret is in base64 form (as `mtg access`
-  prints them), not only the `ee…` hex form. Links are now checked before Docker is needed.
+  prints them), not only the `ee…` hex form. Links are checked before Docker is needed.
+- Probe client:
+  - A blackholed address (for example a firewalled IPv6 address listed first) can no
+    longer use up the whole connect budget; addresses now share it.
+  - The TLS handshake in the HTTPS probe respects the time budget.
+  - `--timeout` and `--retry-delay` are range-checked.
+- `status` before the first `up` says so instead of failing with a generic error.
+- `config set` never leaves a copy of the secret behind when it fails.
+- The watchdog restarts mtg only when the probe reports it unhealthy, never because the
+  probe tool itself failed.
+- Link fields in error messages are escaped, so a crafted link cannot write control
+  sequences to the terminal.
+- `install-host.sh` also finds SSH ports held by a socket-activated `ssh.socket`.
+- Validation rejects IPv6 together with a specific `BIND_ADDR` (which would have listened
+  on loopback only) and paths containing backslashes. Simple-mode configs whose subnet
+  changed keep loading.
+- The decoy's Content-Security-Policy allows self-hosted fonts.
+- Docs:
+  - The upstream SOCKS example pointed at `127.0.0.1`, which is mtg's own container; it
+    now uses the Docker bridge gateway.
+  - Upgrade instructions no longer suggest `git pull` for installs without a git
+    checkout.
+  - The deployment guide states where server commands run.
+  - The generated `.env` links to the right README section.
+- Tests: stronger assertions, test servers that stop cleanly, and a realistic upgrade test
+  (a page dropped between releases must disappear).
 
 ### Changed
 
 - busybox 1.38.0 (pinned by digest) for the one-shot `decoy-init` helper (Dependabot #1).
+- The website works on phones: commands wrap instead of overflowing.
 
 ## [1.1.0] - 2026-11-18
 
@@ -124,6 +172,7 @@ First release. Digby the mole digs his first tunnel.
   release workflow with checksums, and a GitHub Pages site starring Digby.
 - Documentation: an in-depth README and an A-Z deployment guide (`docs/DEPLOY.md`).
 
-[Unreleased]: https://github.com/deadboyccc/Burrow/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/deadboyccc/Burrow/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/deadboyccc/Burrow/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/deadboyccc/Burrow/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/deadboyccc/Burrow/releases/tag/v1.0.0

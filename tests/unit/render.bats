@@ -190,6 +190,36 @@ setup() {
 	assert_output ""
 }
 
+@test "render_all: re-synced sites stay readable by the unprivileged decoy" {
+	export BURROW_ROOT=$BATS_TEST_TMPDIR/root
+	mkdir -p "$BURROW_ROOT/site.local/notes"
+	printf 'one\n' >"$BURROW_ROOT/site.local/index.html"
+	printf 'old\n' >"$BURROW_ROOT/site.local/old.html"
+	printf 'n\n' >"$BURROW_ROOT/site.local/notes/a.html"
+	render_all
+	printf 'two\n' >"$BURROW_ROOT/site.local/index.html"
+	rm "$BURROW_ROOT/site.local/old.html"
+	render_all
+	[[ $(<"$STATE_DIR/site/index.html") == two && ! -e $STATE_DIR/site/old.html ]]
+	run find "$STATE_DIR/site" -type f ! -perm 0644
+	assert_output ""
+	run find "$STATE_DIR/site" -type d ! -perm 0755
+	assert_output ""
+}
+
+@test "render_all: a symlinked site directory is refused" {
+	mkdir -p "$STATE_DIR" "$BATS_TEST_TMPDIR/elsewhere"
+	ln -s "$BATS_TEST_TMPDIR/elsewhere" "$STATE_DIR/site"
+	run render_all
+	assert_failure
+	assert_output --partial "not a symlink"
+}
+
+@test "Caddyfile: the CSP allows self-hosted fonts" {
+	run render_caddyfile
+	assert_output --partial "font-src 'self'"
+}
+
 @test "render_all: dotfiles in site.local are never published" {
 	export BURROW_ROOT=$BATS_TEST_TMPDIR/root
 	mkdir -p "$BURROW_ROOT/site.local/.git" "$BURROW_ROOT/site.local/notes"

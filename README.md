@@ -112,7 +112,7 @@ impersonates a third-party site, is the last resort: easier to set up, easier to
 * **One entry point:** `./burrow` (plain Bash, no runtime dependencies beyond Docker)
   renders configs, starts, checks, shares, rotates, tests and deploys. You never
   hand-edit a TOML or Caddyfile.
-* **Tested like software:** 234 automated tests, including live end-to-end runs that
+* **Tested like software:** 261 automated tests, including live end-to-end runs that
   push real MTProto traffic to Telegram's data centres (see [Testing](#10-testing)).
 
 ---
@@ -325,7 +325,7 @@ Rules for your own pages:
 
 - The decoy sends a strict Content-Security-Policy. Put CSS in files (`<link rel="stylesheet"
   href="/style.css">`), not in `<style>` blocks or `style=""` attributes. Scripts are blocked
-  entirely, and images must come from the site itself.
+  entirely, and images and fonts must come from the site itself.
 - Keep a `404.html`: scanners probe paths like `/wp-admin`.
 - Dotfiles (`.git`, `.DS_Store`) are never published.
 
@@ -423,10 +423,10 @@ make lint              # shellcheck, shfmt, ruff, compose validation
 
 | Suite | What it proves |
 |---|---|
-| **unit/** (bats, 97 tests) | validators reject injection; `.env` parsing never executes code; secrets, links, rendering, permissions, inode-stable re-rendering, the CLI's argument handling. |
-| **tools/tests/** (pytest, 83 tests) | the FakeTLS/obfuscated2/MTProto client against a line-by-line port of mtg's server checks; a full Telegram round trip through a fake relay; probe verdicts and time budgets against hostile and quirky in-process servers (endless empty records, slow drips, resets, terminal-escape injection); QR output. |
-| **integration/** (28 tests) | the pinned **mtg binary** accepts every config variant; **Caddy** validates every Caddyfile; the compose model is hardened (caps, users, ports, digests); `install-host.sh` plans the right steps in a real Debian container (dry run). |
-| **e2e/** (26 tests) | full stacks: all smoke checks including **real Telegram resPQ round trips**; link testing from the host network; container hardening as actually run; decoy pages, 404s, headers and redirects; rotation revokes old links; crash recovery (`kill -9`); hang recovery (watchdog); block and allow lists; clock-skew rejection; simple mode against a real cover site; the whole `burrow try` flow; `burrow deploy` end to end (upload, init on the "server", smoke from both ends, re-deploy keeps the secret); the one-command installer for real (fetch, configure, start, smoke, share, then an in-place upgrade that keeps the secret). |
+| **unit/** (bats, 112 tests) | validators reject injection; `.env` parsing never executes code; secrets, links, rendering, permissions, inode-stable re-rendering, the CLI's argument handling. |
+| **tools/tests/** (pytest, 92 tests) | the FakeTLS/obfuscated2/MTProto client against a line-by-line port of mtg's server checks; a full Telegram round trip through a fake relay; probe verdicts and time budgets against hostile and quirky in-process servers (endless empty records, slow drips, resets, terminal-escape injection); QR output. |
+| **integration/** (29 tests) | the pinned **mtg binary** accepts every config variant; **Caddy** validates every Caddyfile; the compose model is hardened (caps, users, ports, digests); `install-host.sh` plans the right steps in a real Debian container (dry run). |
+| **e2e/** (28 tests) | full stacks: all smoke checks including **real Telegram resPQ round trips**; link testing from the host network; container hardening as actually run; decoy pages, 404s, headers and redirects; rotation revokes old links; crash recovery (`kill -9`); hang recovery (watchdog); block and allow lists; clock-skew rejection; simple mode against a real cover site; the whole `burrow try` flow; `burrow deploy` end to end (upload, init on the "server", smoke from both ends, re-deploy keeps the secret); the one-command installer for real (fetch, configure, start, smoke, share, then an in-place upgrade that keeps the secret). |
 | **smoke** (`burrow smoke`) | the same live checks, against your deployment, on demand or after every deploy. |
 
 CI runs every suite on each push and pull request, plus weekly to catch upstream changes
@@ -441,7 +441,7 @@ CI runs every suite on each push and pull request, plus weekly to catch upstream
 | See health and traffic | `./burrow status` |
 | Prometheus | scrape `http://127.0.0.1:3129/metrics` on the server (`mtg_*` metrics) |
 | Logs | `./burrow logs -f mtg` (rotated: 3 × 10 MB per container) |
-| Update burrow | re-run the install command, or `git pull && ./burrow up`, or re-run `burrow deploy` |
+| Update burrow | re-run the install command (or `burrow deploy`); in a git clone, `git pull && ./burrow up` |
 | Update images only | `./burrow update` |
 | Change a setting | `./burrow config set KEY VALUE && ./burrow up` |
 | Revoke all links | `./burrow rotate` |
@@ -456,11 +456,11 @@ CI runs every suite on each push and pull request, plus weekly to catch upstream
 | Symptom | Likely cause → fix |
 |---|---|
 | `burrow up` says the decoy has no valid certificate | DNS not pointing at the server yet, or port 80 blocked by a cloud firewall. Check `dig +short DOMAIN`, open 80/443 in your provider's panel, then `./burrow logs decoy`. |
-| Telegram shows "connecting…" forever | Run `./burrow smoke --link "$(./burrow link --format tg)"` from another network. If the smoke passes there, your local network is blocking the server's IP. |
+| Telegram shows "connecting…" forever | From a computer on another network (with burrow cloned): `./burrow smoke --link "$(ssh root@203.0.113.7 /opt/burrow/burrow link --format tg)"`. If that passes, your local network is blocking the server's IP. |
 | Works on Wi-Fi, not on mobile data (or vice versa) | IP-level blocking on one network. Try `LINK_HOST` = IP, or a second server. |
 | Many clients rejected | Check the clock: `./burrow doctor`. Clients with wrong clocks are refused by design (`TIME_SKEW`). |
 | `Pool overlaps with other one on this host` | Another Docker network uses `10.203.47.0/28`: `./burrow config set EDGE_SUBNET 10.77.1.0/28 DECOY_IP 10.77.1.10`. |
-| Telegram blocked *from the server* | Set `UPSTREAM_PROXIES=socks5://…` (e.g. a local sing-box/WireGuard egress). |
+| Telegram blocked *from the server* | Run a SOCKS5 egress (sing-box, WireGuard, …) listening on the Docker bridge gateway `10.203.47.1` (first address of `EDGE_SUBNET`), then `UPSTREAM_PROXIES=socks5://10.203.47.1:1080`. Not `127.0.0.1`: mtg runs in a container. |
 | Port 443 already in use | Another web server owns it. burrow must own 443: move the other site behind burrow's decoy (`site.local/`), or use another server. |
 | My custom page shows up unstyled | Inline `<style>` is blocked by the decoy's Content-Security-Policy. Move the CSS into `site.local/style.css` and link it. |
 | No domain, but I want a real certificate | Use `<your-ip-with-dashes>.sslip.io` as the domain and set `LINK_HOST` to the IP. |

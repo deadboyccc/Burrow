@@ -1,6 +1,6 @@
 [project]
 name = "burrow-tools"
-version = "1.1.0"
+version = "1.1.1"
 description = "Probes, smoke tests and offline QR codes for a burrow MTProto proxy"
 requires-python = ">=3.12"
 license = "MIT"

@@ -46,3 +46,12 @@ installer() { bash "$BURROW_ROOT/install.sh"; }
 	assert_failure
 	assert_output --partial "run as root"
 }
+
+@test "yes/no settings never fail open" {
+	BURROW_DOMAIN=notes.example.org BURROW_DRY_RUN=maybe run installer
+	assert_failure
+	assert_output --partial "BURROW_DRY_RUN must be 1 or 0"
+	BURROW_DOMAIN=notes.example.org BURROW_SKIP_HOST_SETUP=sure run installer
+	assert_failure
+	assert_output --partial "BURROW_SKIP_HOST_SETUP must be 1 or 0"
+}

@@ -29,6 +29,8 @@ setup() {
 	load ../helpers
 	require_docker
 	unset BURROW_ENV_FILE BURROW_STATE_DIR # the "server" uses its own install dir
+	# Deploy runs the full smoke test, Telegram round trip included.
+	[[ ${BURROW_E2E_OFFLINE:-0} != 1 ]] || skip "needs the internet (Telegram)"
 }
 
 as_remote() { if ((EUID == 0)); then "$@"; else sudo -n env BURROW_PROJECT="$BURROW_PROJECT" "$@"; fi; }

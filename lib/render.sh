@@ -135,7 +135,7 @@ ${tls_line}	root * /srv
 		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "strict-origin-when-cross-origin"
-		Content-Security-Policy "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+		Content-Security-Policy "default-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 	}
 	# Never serve dotfiles, even if one slips into site.local/.
 	file_server {
@@ -187,6 +187,8 @@ site_source_dir() {
 
 render_site() {
 	local dest=$1 src name accent year file content new
+	# A symlinked site directory would be merged into, not replaced.
+	[[ ! -L $dest ]] || die "$dest must be a real directory, not a symlink"
 	src=$(site_source_dir)
 	name=$(site_name "$DOMAIN")
 	accent=$(site_accent "$DOMAIN")
@@ -213,12 +215,20 @@ render_site() {
 	elif [[ $(cd "$dest" && hash_paths .) == $(cd "$new" && hash_paths .) ]]; then
 		rm -rf -- "$new"
 	else
-		# Replace the contents, not the directory: a running decoy has the
-		# directory itself bind-mounted and must keep seeing it.
-		find "$dest" -mindepth 1 -delete
-		cp -R "$new/." "$dest/"
+		# Update the contents, not the directory: a running decoy has the
+		# directory itself bind-mounted. Copy first (with the modes set above,
+		# so the unprivileged decoy can read everything), then prune what is
+		# gone, so the site never goes empty in between.
+		cp -pR "$new/." "$dest/"
+		local path
+		while IFS= read -r -d '' path; do
+			[[ -e $new/${path#"$dest"/} ]] || rm -rf -- "$path"
+		done < <(find "$dest" -mindepth 1 -depth -print0)
 		rm -rf -- "$new"
 	fi
+	# Belt and braces: whatever happened above, leave it readable by the decoy.
+	find "$dest" -type d -exec chmod 0755 {} +
+	find "$dest" -type f -exec chmod 0644 {} +
 }
 
 render_lists() {

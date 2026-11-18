@@ -264,7 +264,7 @@ Prefer doing it by hand, or want every detail? → **[docs/DEPLOY.md](docs/DEPLO
 | `share` | Links + terminal QR + private PNG/SVG in `state/share/`. |
 | `rotate [--yes]` | New secret; old links stop working. |
 | `status` | Containers, a live FakeTLS check, traffic counters. |
-| `smoke [--link L] [--insecure] [--no-telegram]` | End-to-end self-test (see below). |
+| `smoke [--link L] [--insecure] [--no-telegram]` | End-to-end self-test (see below). `--link` takes any proxy link, with the secret in hex or base64. |
 | `doctor` | Host, clock, BBR, DNS, `.env`, decoy, plus `mtg doctor`. |
 | `logs [-f] [mtg\|decoy]` | Container logs. |
 | `restart`, `down [--volumes]`, `update` | Lifecycle. `update` pulls the pinned images and recreates. |

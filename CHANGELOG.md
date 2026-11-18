@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `burrow smoke --link` accepts links whose secret is in base64 form (as `mtg access`
+  prints them), not only the `ee…` hex form. Links are now checked before Docker is needed.
+
 ### Changed
 
 - busybox 1.38.0 (pinned by digest) for the one-shot `decoy-init` helper (Dependabot #1).

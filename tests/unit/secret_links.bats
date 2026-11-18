@@ -115,3 +115,21 @@ setup() {
 	run join_by ', '
 	assert_output ""
 }
+
+@test "secret_normalize: hex in any case, base64 and base64url, padded or not" {
+	hex=ee00112233445566778899aabbccddeeff6e6f7465732e6578616d706c652e6f7267 # gitleaks:allow (fake fixture)
+	for s in "$hex" "${hex^^}" 7gARIjNEVWZ3iJmqu8zd7v9ub3Rlcy5leGFtcGxlLm9yZw \
+		7gARIjNEVWZ3iJmqu8zd7v9ub3Rlcy5leGFtcGxlLm9yZw==; do
+		run secret_normalize "$s"
+		assert_success
+		assert_output "$hex"
+	done
+}
+
+@test "secret_normalize: rejects non-FakeTLS and malformed secrets" {
+	# 3QAR... is the base64 of a legacy dd... secret.
+	for s in "" 'bad!' 3QARIjNEVWZ3iJmqu8zd7v9ub3Rlcy5leGFtcGxlLm9yZw dd00112233445566778899aabbccddeeff ee00 ee0011; do
+		run secret_normalize "$s"
+		assert_failure
+	done
+}

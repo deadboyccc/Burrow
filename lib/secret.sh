@@ -32,6 +32,26 @@ secret_host() {
 	hex_decode "${1:34}"
 }
 
+# secret_normalize SECRET: accept the hex form (ee…, any case) or the
+# base64/base64url form that Telegram links and `mtg access` also use, and
+# print the canonical lowercase hex form. Fails for anything else.
+secret_normalize() {
+	local s=$1 b64 hex
+	if [[ ${s,,} =~ ^ee([0-9a-f]{2})+$ ]]; then
+		hex=${s,,}
+	elif [[ $s =~ ^[A-Za-z0-9+/_-]+=*$ ]]; then
+		b64=${s%%=*}
+		b64=${b64//-/+}
+		b64=${b64//_//}
+		while ((${#b64} % 4)); do b64+='='; done
+		hex=$(printf '%s' "$b64" | { base64 -d 2>/dev/null || base64 -D 2>/dev/null; } | od -An -tx1 -v | tr -d ' \n')
+	else
+		return 1
+	fi
+	secret_is_valid "$hex" || return 1
+	printf '%s\n' "$hex"
+}
+
 # Never print a full secret in logs.
 secret_redact() {
 	printf '%s…%s\n' "${1:0:6}" "${1: -4}"

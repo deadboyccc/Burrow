@@ -598,6 +598,9 @@ parse_link() { # sets LINK_SERVER LINK_PORT LINK_SECRET
 		die "not a proxy link (expected tg://proxy?server=...&port=...&secret=...)"
 	is_port "$LINK_PORT" || die "bad port in link: $LINK_PORT"
 	{ is_hostname "$LINK_SERVER" || is_ip "$LINK_SERVER"; } || die "bad server in link: $LINK_SERVER"
+	# Links carry the secret as hex (ee…) or base64; mtg itself prints base64.
+	LINK_SECRET=$(secret_normalize "$LINK_SECRET") ||
+		die "the link does not carry a FakeTLS secret (ee… in hex, or its base64 form)"
 }
 
 _smoke_check() { # _smoke_check DESCRIPTION -- runner args...
@@ -625,14 +628,14 @@ cmd_smoke() {
 		esac
 		shift
 	done
+	# Check the link before anything slow, so a bad link fails immediately.
+	[[ -z $link ]] || parse_link "$link"
 	require_docker
 	ensure_tools_image
 
 	local runner host port sni secret
 	if [[ -n $link ]]; then
-		parse_link "$link"
 		runner=tools_on_host host=$LINK_SERVER port=$LINK_PORT secret=$LINK_SECRET
-		secret_is_valid "$secret" || die "the link does not carry a FakeTLS (ee...) secret"
 		sni=$(secret_host "$secret")
 		info "smoke-testing $host:$port (fronting as $sni) from this machine"
 	else

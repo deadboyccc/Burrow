@@ -63,6 +63,13 @@ tools_host() { # tools_host SECRET ARGS...
 	assert_success
 }
 
+@test "smoke --link: links with the base64 form of the secret work too" {
+	b64=$(python3 -c 'import base64, sys; print(base64.urlsafe_b64encode(bytes.fromhex(sys.argv[1])).decode().rstrip("="))' \
+		"$(burrow config get SECRET)")
+	run burrow smoke --link "tg://proxy?server=127.0.0.1&port=$PROXY_PORT&secret=$b64" --insecure --no-telegram
+	assert_success
+}
+
 @test "status reports a healthy proxy and traffic counters" {
 	run burrow status
 	assert_success

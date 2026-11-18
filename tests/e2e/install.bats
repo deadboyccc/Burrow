@@ -10,10 +10,13 @@ setup_file() {
 	export WORK=$BATS_FILE_TMPDIR
 	export REMOTE_DIR=$WORK/opt/burrow
 	export BURROW_PROJECT=burrow-e2e-install-$$
-	# A throwaway repository with a branch at the commit under test.
-	git init -q "$WORK/repo"
-	git -C "$WORK/repo" fetch -q "$BURROW_ROOT" HEAD
-	git -C "$WORK/repo" branch -q e2e FETCH_HEAD
+	# A throwaway repository holding the commit under test. Built from
+	# `git archive`, so it also works from CI's shallow checkouts.
+	mkdir -p "$WORK/repo"
+	git -C "$BURROW_ROOT" archive HEAD | tar -x -C "$WORK/repo"
+	git -C "$WORK/repo" init -q -b e2e
+	git -C "$WORK/repo" add -A
+	git -C "$WORK/repo" -c user.name=burrow-tests -c user.email=tests@burrow.invalid commit -q -m "commit under test"
 }
 
 teardown_file() {

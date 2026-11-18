@@ -5,8 +5,10 @@ from __future__ import annotations
 import contextlib
 import socket
 import ssl
+import struct
 import subprocess
 import threading
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -20,7 +22,7 @@ from cryptography.x509.oid import NameOID
 from burrow_tools import faketls, probe
 from burrow_tools.secret import Secret
 
-from .mtg_reference import check_client_hello, server_flight
+from .mtg_reference import ServerObfuscation, app_record, check_client_hello, res_pq_packet, server_flight
 
 SECRET = Secret(key=bytes(range(16)), host="notes.example.org")
 
@@ -222,3 +224,219 @@ def test_cli_exit_codes(server):
     failing = subprocess.run([*base, "--expect", "fronted"], env=env, check=False, capture_output=True)
     assert failing.returncode == 1
     assert b"FAIL faketls: proxy" in failing.stdout
+
+
+# --- hostile and quirky servers (burrow smoke --link can point anywhere) ----
+
+
+def valid_flight_then(after: Callable[[socket.socket], None]) -> Callable[[socket.socket], None]:
+    def handler(conn: socket.socket) -> None:
+        hello = check_client_hello(SECRET.key, SECRET.host, read_hello(conn))
+        conn.sendall(server_flight(SECRET.key, hello))
+        after(conn)
+
+    return handler
+
+
+def test_endless_empty_records_cannot_stall_the_telegram_probe(server):
+    def flood(conn):
+        while True:
+            conn.sendall(app_record(b"") * 256)
+
+    srv = server(valid_flight_then(flood))
+    started = time.monotonic()
+    result = probe.telegram_probe("127.0.0.1", srv.port, SECRET, timeout=3)
+    assert result.verdict == probe.ERROR
+    assert "without any data" in result.detail
+    assert time.monotonic() - started < 3.5
+
+
+def test_slow_drip_is_bounded_by_the_overall_budget(server):
+    def drip(conn):
+        read_hello(conn)
+        for byte in b"\x16\x03\x03\x00\x20" + bytes(32):
+            conn.sendall(bytes([byte]))
+            time.sleep(0.4)
+
+    srv = server(drip)
+    started = time.monotonic()
+    result = probe.faketls_probe("127.0.0.1", srv.port, SECRET, timeout=1.5)
+    assert result.verdict in (probe.ERROR, probe.FRONTED)
+    assert time.monotonic() - started < 2.5
+
+
+def test_header_then_close_is_fronted_not_closed(server):
+    def header_only(conn):
+        read_hello(conn)
+        conn.sendall(b"\x16\x03\x03\x00\x40")
+
+    srv = server(header_only)
+    assert probe.faketls_probe("127.0.0.1", srv.port, SECRET).verdict == probe.FRONTED
+
+
+def reset(conn: socket.socket) -> None:
+    conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+    conn.close()
+
+
+def test_server_hello_then_reset_is_fronted(server):
+    def hello_then_reset(conn):
+        read_hello(conn)
+        body = b"\x02\x00\x00\x46\x03\x03" + bytes(70)
+        conn.sendall(b"\x16\x03\x03" + struct.pack(">H", len(body)) + body + b"\x14\x03")
+        time.sleep(0.1)
+        reset(conn)
+
+    srv = server(hello_then_reset)
+    assert probe.faketls_probe("127.0.0.1", srv.port, SECRET).verdict == probe.FRONTED
+
+
+def test_partial_flight_then_silence_is_fronted_quickly(server):
+    def hello_retry_and_wait(conn):
+        read_hello(conn)
+        body = b"\x02\x00\x00\x46\x03\x03" + bytes(70)
+        conn.sendall(b"\x16\x03\x03" + struct.pack(">H", len(body)) + body + b"\x14\x03\x03\x00\x01\x01")
+        time.sleep(8)
+
+    srv = server(hello_retry_and_wait)
+    started = time.monotonic()
+    assert probe.faketls_probe("127.0.0.1", srv.port, SECRET, timeout=6).verdict == probe.FRONTED
+    assert time.monotonic() - started < faketls.FLIGHT_FOLLOW_UP + 1
+
+
+def test_replay_is_inconclusive_if_the_first_attempt_failed(server):
+    attempts = []
+
+    def flaky_first(conn):
+        attempts.append(1)
+        if len(attempts) == 1:
+            return  # dropped before mtg could remember the hello
+        fake_mtg()(conn)
+
+    srv = server(flaky_first)
+    result = probe.replay_probe("127.0.0.1", srv.port, SECRET)
+    assert result.verdict == probe.ERROR
+    assert "inconclusive" in result.detail
+
+
+def test_telegram_round_trip_through_a_fake_relay(server):
+    """The whole client path: FakeTLS, obfuscated2, padded intermediate, resPQ."""
+    seen = {}
+
+    def relay(conn):
+        hello = check_client_hello(SECRET.key, SECRET.host, read_hello(conn))
+        conn.sendall(server_flight(SECRET.key, hello))
+        buffer = bytearray()
+
+        def read_app(size):
+            while len(buffer) < size:
+                record = read_hello(conn)  # same 5-byte header framing
+                if record[0] == 0x17:
+                    buffer.extend(record[5:])
+            data = bytes(buffer[:size])
+            del buffer[:size]
+            return data
+
+        obf = ServerObfuscation(SECRET.key, read_app(64))
+        seen["tag"], seen["dc"] = obf.tag, obf.dc
+        length = int.from_bytes(obf.recv.update(read_app(4)), "little")
+        request = obf.recv.update(read_app(length))
+        nonce = request[24:40]
+        answer = res_pq_packet(nonce, bytes(16), b"\x17\xed\x48\x94\x1a\x08\xf9\x81", [7, 8])
+        packet = obf.send.update(struct.pack("<I", len(answer)) + answer)
+        # Split across records, with an empty record in between, like a real relay may.
+        conn.sendall(app_record(packet[:10]) + app_record(b"") + app_record(packet[10:]))
+
+    srv = server(relay)
+    result = probe.telegram_probe("127.0.0.1", srv.port, SECRET, dc=4)
+    assert result.verdict == probe.PROXY, result.detail
+    assert result.data["fingerprints"] == 2
+    assert seen == {"tag": b"\xdd\xdd\xdd\xdd", "dc": 4}
+
+
+def http_server(server, response: bytes, *, then: Callable[[socket.socket], None] | None = None):
+    def handler(conn):
+        conn.recv(4096)
+        conn.sendall(response)
+        if then:
+            then(conn)
+
+    return server(handler)
+
+
+def test_plaintext_keeps_the_answer_when_the_server_then_resets(server):
+    srv = http_server(server, b"HTTP/1.1 400 Bad Request\r\n\r\n", then=lambda c: (time.sleep(0.1), reset(c)))
+    result = probe.plaintext_probe("127.0.0.1", srv.port)
+    assert result.verdict == probe.FRONTED
+    assert result.data["status"] == 400
+
+
+def test_plaintext_server_that_keeps_the_connection_open(server):
+    srv = http_server(server, b"HTTP/1.1 400 Bad Request\r\n\r\n", then=lambda c: time.sleep(5))
+    started = time.monotonic()
+    result = probe.plaintext_probe("127.0.0.1", srv.port, timeout=1)
+    assert result.verdict == probe.FRONTED
+    assert time.monotonic() - started < 2
+
+
+def test_https_keep_alive_response_counts(server, tls_cert):
+    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    context.load_cert_chain(*tls_cert)
+
+    def handler(conn):
+        with context.wrap_socket(conn, server_side=True) as tls:
+            tls.recv(4096)
+            tls.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+            time.sleep(5)  # ignores Connection: close
+
+    srv = server(handler)
+    result = probe.https_probe("127.0.0.1", srv.port, SECRET.host, insecure=True, timeout=1.5)
+    assert result.verdict == probe.FRONTED
+    assert result.data["status"] == 200
+
+
+def test_https_non_ascii_status_does_not_crash(server, tls_cert):
+    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    context.load_cert_chain(*tls_cert)
+
+    def handler(conn):
+        with context.wrap_socket(conn, server_side=True) as tls:
+            tls.recv(4096)
+            tls.sendall("HTTP/1.1 ² OK\r\n\r\n".encode("latin-1"))
+
+    srv = server(handler)
+    result = probe.https_probe("127.0.0.1", srv.port, SECRET.host, insecure=True)
+    assert result.verdict == probe.FRONTED
+    assert result.data["status"] == 0
+
+
+def test_https_missing_cafile_is_a_verdict_not_a_crash():
+    result = probe.https_probe("127.0.0.1", 9, SECRET.host, cafile="/nonexistent/ca.pem")
+    assert result.verdict == probe.ERROR
+
+
+def test_cli_neutralises_terminal_escapes(server):
+    evil = b"\x1b]0;pwned\x07\x1b[2K\rPASS all good\r\n\r\n"
+    srv = http_server(server, evil)
+    env = {"PATH": "/usr/local/bin:/usr/bin:/bin"}
+    out = subprocess.run(
+        [
+            "python",
+            "-m",
+            "burrow_tools",
+            "plaintext",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(srv.port),
+            "--expect-status",
+            "200",
+        ],
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert out.returncode == 1
+    assert "\x1b" not in out.stdout and "\r" not in out.stdout
+    assert out.stdout.startswith("FAIL plaintext:")

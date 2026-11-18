@@ -41,6 +41,20 @@ class TestSecret:
         with pytest.raises(SecretError):
             Secret.parse(bad)
 
+    @pytest.mark.parametrize("legacy", ["dd00112233445566778899aabbccddeeff", "00112233445566778899aabbccddeeff"])
+    def test_legacy_secrets_get_the_right_message(self, legacy):
+        with pytest.raises(SecretError, match="only FakeTLS"):
+            Secret.parse(legacy)
+
+    def test_hostname_with_trailing_newline_is_rejected(self):
+        with pytest.raises(SecretError, match="hostname"):
+            Secret.parse("ee00112233445566778899aabbccddeeff" + b"notes.example.org\n".hex())
+
+    def test_repr_never_shows_the_key(self):
+        secret = Secret.parse(HEX)
+        assert "00112233" not in repr(secret)
+        assert "notes.example.org" in repr(secret)
+
 
 class TestQR:
     LINK = "https://t.me/proxy?server=notes.example.org&port=443&secret=" + HEX
@@ -79,6 +93,25 @@ class TestCLI:
     def test_qr_from_text(self, capsys):
         assert main(["qr", "--text", "hello"]) == 0
         assert "█" in capsys.readouterr().out
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["probe", "--host", "h", "--port", "70000"],
+            ["probe", "--host", "h", "--port", "0"],
+            ["probe", "--host", "h", "--dc", "40000"],
+            ["probe", "--host", "h", "--retries", "-1"],
+        ],
+    )
+    def test_out_of_range_arguments_are_usage_errors(self, argv):
+        with pytest.raises(SystemExit) as exc:
+            main(argv)
+        assert exc.value.code == 2
+
+    def test_time_offset_with_telegram_is_rejected(self, monkeypatch, capsys):
+        monkeypatch.setenv("BURROW_SECRET", HEX)
+        assert main(["probe", "--host", "127.0.0.1", "--telegram", "--time-offset", "60"]) == 2
+        assert "--time-offset" in capsys.readouterr().err
 
     def test_probe_json_output(self, monkeypatch, capsys):
         monkeypatch.setenv("BURROW_SECRET", HEX)

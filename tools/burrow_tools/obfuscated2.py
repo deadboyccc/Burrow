@@ -36,6 +36,8 @@ FORBIDDEN_PREFIXES = frozenset(
 
 
 def generate_frame(dc: int, rand: RandomSource = os.urandom) -> bytearray:
+    if not -(1 << 15) <= dc < 1 << 15:
+        raise ValueError(f"DC {dc} does not fit the protocol's int16 field")
     while True:
         frame = bytearray(rand(FRAME_LEN))
         if frame[0] == 0xEF:  # abridged transport marker

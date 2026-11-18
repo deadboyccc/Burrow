@@ -26,13 +26,33 @@ def _secret(args: argparse.Namespace) -> Secret:
     return Secret.parse(text)
 
 
+def printable(text: str, limit: int = 200) -> str:
+    """Server-controlled text, made safe for a terminal: no escape sequences,
+    no carriage returns that could overwrite a FAIL line, bounded length."""
+    safe = "".join(c if c.isprintable() else f"\\x{ord(c):02x}" for c in text)
+    return safe if len(safe) <= limit else safe[:limit] + "…"
+
+
 def _report(result: probe.Result, args: argparse.Namespace, ok: bool) -> int:
-    if args.json:
+    if args.json:  # json.dumps escapes control characters
         print(json.dumps({"ok": ok, **result.as_dict()}, sort_keys=True))
     else:
         mark = "PASS" if ok else "FAIL"
-        print(f"{mark} {result.check}: {result.verdict} - {result.detail} ({result.elapsed_ms:.0f} ms)")
+        print(f"{mark} {result.check}: {result.verdict} - {printable(result.detail)} ({result.elapsed_ms:.0f} ms)")
     return 0 if ok else 1
+
+
+def _int_range(low: int, high: int) -> Callable[[str], int]:
+    def parse(text: str) -> int:
+        try:
+            value = int(text)
+        except ValueError:
+            raise argparse.ArgumentTypeError(f"not an integer: {text!r}") from None
+        if not low <= value <= high:
+            raise argparse.ArgumentTypeError(f"must be between {low} and {high}")
+        return value
+
+    return parse
 
 
 def _with_retries(
@@ -49,6 +69,8 @@ def _with_retries(
 
 
 def cmd_probe(args: argparse.Namespace) -> int:
+    if args.telegram and args.time_offset:
+        raise ValueError("--time-offset cannot be combined with --telegram")
     secret = _secret(args)
     if args.telegram:
 
@@ -124,9 +146,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     def network(p: argparse.ArgumentParser, *, needs_secret: bool) -> None:
         p.add_argument("--host", required=True)
-        p.add_argument("--port", type=int, default=443)
+        p.add_argument("--port", type=_int_range(1, 65535), default=443)
         p.add_argument("--timeout", type=float, default=10.0)
-        p.add_argument("--retries", type=int, default=0, help="retry until the expectation holds")
+        p.add_argument("--retries", type=_int_range(0, 1000), default=0, help="retry until the expectation holds")
         p.add_argument("--retry-delay", type=float, default=1.0)
         p.add_argument("--json", action="store_true")
         if needs_secret:
@@ -135,7 +157,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("probe", help="FakeTLS handshake (and optionally a Telegram round trip)")
     network(p, needs_secret=True)
     p.add_argument("--telegram", action="store_true", help="also relay req_pq_multi to a Telegram DC")
-    p.add_argument("--dc", type=int, default=2)
+    p.add_argument("--dc", type=_int_range(-(1 << 15), (1 << 15) - 1), default=2)
     p.add_argument("--time-offset", type=int, default=0, help="skew the client clock by N seconds")
     p.add_argument("--expect", choices=VERDICTS, default=probe.PROXY)
     p.set_defaults(func=cmd_probe)

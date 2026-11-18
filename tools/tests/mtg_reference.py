@@ -15,7 +15,11 @@ import time
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-from burrow_tools import faketls
+# Hard-coded from mtg rather than imported from the client, so a wrong client
+# constant cannot be mirrored here and pass unnoticed.
+RANDOM_OFFSET = 11  # record header (5) + handshake type (1) + length (3) + version (2)
+RES_PQ = 0x05162463
+VECTOR = 0x1CB5C415
 
 
 def check_client_hello(key: bytes, hostname: str, record: bytes, tolerance: int = 5) -> dict:
@@ -53,7 +57,7 @@ def check_client_hello(key: bytes, hostname: str, record: bytes, tolerance: int 
             names.append(data[5 : 5 + nlen].decode())
     assert hostname in names, f"SNI {names}"
 
-    zeroed = record[: faketls.RANDOM_OFFSET] + bytes(32) + record[faketls.RANDOM_OFFSET + 32 :]
+    zeroed = record[:RANDOM_OFFSET] + bytes(32) + record[RANDOM_OFFSET + 32 :]
     computed = bytearray(hmac.new(key, zeroed, hashlib.sha256).digest())
     for i in range(32):
         computed[i] ^= random[i]
@@ -82,7 +86,7 @@ def server_flight(key: bytes, hello: dict) -> bytes:
     noise = os.urandom(2500)
     packet += b"\x17\x03\x03" + struct.pack(">H", len(noise)) + noise
     digest = hmac.new(key, hello["random"] + bytes(packet), hashlib.sha256).digest()
-    packet[faketls.RANDOM_OFFSET : faketls.RANDOM_OFFSET + 32] = digest
+    packet[RANDOM_OFFSET : RANDOM_OFFSET + 32] = digest
     return bytes(packet)
 
 
@@ -100,3 +104,22 @@ class ServerObfuscation:
         decrypted = self.recv.update(frame)
         self.tag = decrypted[56:60]
         self.dc = struct.unpack("<h", decrypted[60:62])[0]
+
+
+def res_pq_packet(nonce: bytes, server_nonce: bytes, pq: bytes, fingerprints: list[int]) -> bytes:
+    """An unencrypted resPQ message, as a Telegram DC sends it."""
+    pq_tl = bytes([len(pq)]) + pq
+    pq_tl += bytes(-len(pq_tl) % 4)
+    body = (
+        struct.pack("<I", RES_PQ)
+        + nonce
+        + server_nonce
+        + pq_tl
+        + struct.pack("<Ii", VECTOR, len(fingerprints))
+        + b"".join(struct.pack("<q", f) for f in fingerprints)
+    )
+    return struct.pack("<qqi", 0, 123 << 32, len(body)) + body
+
+
+def app_record(payload: bytes) -> bytes:
+    return b"\x17\x03\x03" + struct.pack(">H", len(payload)) + payload

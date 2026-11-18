@@ -200,7 +200,11 @@ def verify_server_flight(key: bytes, client_random: bytes, flight: bytes) -> boo
 
 
 class ConnectionClosed(EOFError):
-    """The peer closed the connection before sending everything we needed."""
+    """The peer closed the connection before sending everything we needed.
+
+    ``received`` counts every byte of the current TLS record that did arrive,
+    so callers can tell "said nothing" (0) from "said something, then hung up".
+    """
 
     def __init__(self, received: int, expected: int) -> None:
         super().__init__(f"connection closed after {received}/{expected} bytes")
@@ -208,39 +212,84 @@ class ConnectionClosed(EOFError):
         self.expected = expected
 
 
-def recv_exact(sock: socket.socket, size: int) -> bytes:
+class Deadline:
+    """One time budget for a whole probe, applied before every blocking call.
+
+    A per-call socket timeout is not enough: a hostile server can drip one
+    byte just before each timeout and keep a probe busy forever.
+    """
+
+    def __init__(self, seconds: float) -> None:
+        self.end = time.monotonic() + seconds
+
+    def remaining(self) -> float:
+        return self.end - time.monotonic()
+
+    def apply(self, sock: socket.socket) -> None:
+        left = self.remaining()
+        if left <= 0:
+            raise TimeoutError("probe time budget exhausted")
+        sock.settimeout(left)
+
+    def within(self, seconds: float) -> Deadline:
+        """A deadline that ends after ``seconds`` or with this one, whichever is first."""
+        tighter = Deadline(0)
+        tighter.end = min(self.end, time.monotonic() + seconds)
+        return tighter
+
+
+def recv_exact(sock: socket.socket, size: int, deadline: Deadline | None = None) -> bytes:
     chunks = bytearray()
     while len(chunks) < size:
-        chunk = sock.recv(size - len(chunks))
+        if deadline is not None:
+            deadline.apply(sock)
+        try:
+            chunk = sock.recv(size - len(chunks))
+        except ConnectionResetError as exc:
+            if chunks:
+                raise ConnectionClosed(len(chunks), size) from exc
+            raise
         if not chunk:
             raise ConnectionClosed(len(chunks), size)
         chunks.extend(chunk)
     return bytes(chunks)
 
 
-def read_record(sock: socket.socket) -> Record:
-    header = recv_exact(sock, RECORD_HEADER_LEN)
+def read_record(sock: socket.socket, deadline: Deadline | None = None) -> Record:
+    header = recv_exact(sock, RECORD_HEADER_LEN, deadline)
     if header[1] != 0x03:
         raise FakeTLSError(f"not a TLS record: {header.hex()}")
     length = struct.unpack(">H", header[3:5])[0]
-    payload = recv_exact(sock, length)
+    try:
+        payload = recv_exact(sock, length, deadline)
+    except ConnectionClosed as exc:
+        raise ConnectionClosed(RECORD_HEADER_LEN + exc.received, RECORD_HEADER_LEN + length) from exc
+    except ConnectionResetError as exc:
+        raise ConnectionClosed(RECORD_HEADER_LEN, RECORD_HEADER_LEN + length) from exc
     return Record(type=header[0], payload=payload, raw=header + payload)
 
 
-def read_server_flight(sock: socket.socket) -> list[Record]:
+# A real FakeTLS proxy writes its whole flight at once. Anything slower than
+# this after the first record is a regular TLS server waiting for us.
+FLIGHT_FOLLOW_UP = 2.0
+
+
+def read_server_flight(sock: socket.socket, deadline: Deadline | None = None) -> list[Record]:
     """Read the 3-record flight a FakeTLS proxy sends: ServerHello, CCS, data.
 
     Raises :class:`ConnectionClosed` with ``received == 0`` only when the peer
-    sent nothing at all. A flight cut short after the first record comes back
-    truncated, because that is still an answer, just not a proxy's answer.
+    sent nothing at all. A flight cut short after the first record (closed,
+    reset, garbage or silence) comes back truncated: that is still an answer,
+    just not a proxy's answer.
     """
-    records = [read_record(sock)]
+    records = [read_record(sock, deadline)]
     if records[0].type != RECORD_HANDSHAKE:
         return records
+    rest = deadline.within(FLIGHT_FOLLOW_UP) if deadline is not None else Deadline(FLIGHT_FOLLOW_UP)
     try:
-        records.append(read_record(sock))
-        records.append(read_record(sock))
-    except ConnectionClosed:
+        for _ in range(2):
+            records.append(read_record(sock, rest))
+    except (ConnectionClosed, ConnectionResetError, TimeoutError, FakeTLSError):
         pass
     return records
 
@@ -256,8 +305,14 @@ def is_proxy_flight(key: bytes, client_random: bytes, records: list[Record]) -> 
 class FakeTLSConnection:
     """Wraps a socket after a successful FakeTLS handshake."""
 
-    def __init__(self, sock: socket.socket) -> None:
+    # Records that carry no application data (empty, CCS, handshake) are
+    # skipped, but only this many in a row: a hostile peer could otherwise
+    # stream them forever.
+    MAX_IDLE_RECORDS = 64
+
+    def __init__(self, sock: socket.socket, deadline: Deadline | None = None) -> None:
         self.sock = sock
+        self.deadline = deadline
         self._buffer = bytearray()
         self._sent_ccs = False
 
@@ -270,15 +325,23 @@ class FakeTLSConnection:
         for offset in range(0, len(data), MAX_RECORD_PAYLOAD):
             chunk = data[offset : offset + MAX_RECORD_PAYLOAD]
             out += _u8(RECORD_APPLICATION_DATA) + b"\x03\x03" + _vec16(chunk)
+        if self.deadline is not None:
+            self.deadline.apply(self.sock)
         self.sock.sendall(bytes(out))
 
     def recv_exact(self, size: int) -> bytes:
+        idle = 0
         while len(self._buffer) < size:
-            record = read_record(self.sock)
-            if record.type == RECORD_APPLICATION_DATA:
-                self._buffer += record.payload
-            elif record.type == RECORD_ALERT:
+            record = read_record(self.sock, self.deadline)
+            if record.type == RECORD_ALERT:
                 raise FakeTLSError(f"peer sent TLS alert {record.payload.hex()}")
+            if record.type == RECORD_APPLICATION_DATA and record.payload:
+                self._buffer += record.payload
+                idle = 0
+                continue
+            idle += 1
+            if idle > self.MAX_IDLE_RECORDS:
+                raise FakeTLSError(f"peer sent {idle} records without any data")
         data = bytes(self._buffer[:size])
         del self._buffer[:size]
         return data

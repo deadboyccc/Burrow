@@ -11,7 +11,7 @@ import pytest
 from burrow_tools import faketls, mtproto
 from burrow_tools.obfuscated2 import FORBIDDEN_PREFIXES, ObfuscatedStream, generate_frame
 
-from .mtg_reference import ServerObfuscation, check_client_hello, server_flight
+from .mtg_reference import ServerObfuscation, check_client_hello, res_pq_packet, server_flight
 
 KEY = bytes.fromhex("00112233445566778899aabbccddeeff")
 HOST = "notes.example.org"
@@ -93,7 +93,7 @@ class TestObfuscated2:
             assert frame[56:60] == b"\xdd\xdd\xdd\xdd"
 
     def test_forbidden_prefix_is_regenerated(self):
-        frames = iter([b"HEAD" + os.urandom(60), b"\xef" + os.urandom(63), os.urandom(64)])
+        frames = iter([b"HEAD" + os.urandom(60), b"\xef" + os.urandom(63), bytes(range(1, 65))])
         frame = generate_frame(2, rand=lambda n: next(frames))
         assert frame[:4] != b"HEAD" and frame[0] != 0xEF
 
@@ -103,6 +103,11 @@ class TestObfuscated2:
         server = ServerObfuscation(KEY, stream.handshake)
         assert server.tag == b"\xdd\xdd\xdd\xdd"
         assert server.dc == dc
+
+    @pytest.mark.parametrize("dc", [1 << 15, -(1 << 15) - 1])
+    def test_dc_must_fit_int16(self, dc):
+        with pytest.raises(ValueError, match="int16"):
+            ObfuscatedStream(KEY, dc=dc)
 
     def test_both_directions_roundtrip(self):
         stream = ObfuscatedStream(KEY, dc=2)
@@ -115,20 +120,6 @@ class TestObfuscated2:
     def test_wrong_secret_garbles_tag(self):
         stream = ObfuscatedStream(KEY, dc=2)
         assert ServerObfuscation(os.urandom(16), stream.handshake).tag != b"\xdd\xdd\xdd\xdd"
-
-
-def _res_pq(nonce: bytes, server_nonce: bytes, pq: bytes, fingerprints: list[int]) -> bytes:
-    pq_tl = bytes([len(pq)]) + pq
-    pq_tl += bytes(-len(pq_tl) % 4)
-    body = (
-        struct.pack("<I", mtproto.RES_PQ)
-        + nonce
-        + server_nonce
-        + pq_tl
-        + struct.pack("<Ii", mtproto.VECTOR, len(fingerprints))
-        + b"".join(struct.pack("<q", f) for f in fingerprints)
-    )
-    return struct.pack("<qqi", 0, 123 << 32, len(body)) + body
 
 
 class TestMTProto:
@@ -157,13 +148,15 @@ class TestMTProto:
 
     def test_parse_res_pq(self):
         nonce, server_nonce = os.urandom(16), os.urandom(16)
-        res = mtproto.parse_res_pq(_res_pq(nonce, server_nonce, b"\x17\xed\x48\x94\x1a\x08\xf9\x81", [1, -2]), nonce)
+        res = mtproto.parse_res_pq(
+            res_pq_packet(nonce, server_nonce, b"\x17\xed\x48\x94\x1a\x08\xf9\x81", [1, -2]), nonce
+        )
         assert res.server_nonce == server_nonce
         assert res.pq == b"\x17\xed\x48\x94\x1a\x08\xf9\x81"
         assert res.fingerprints == (1, -2)
 
     def test_nonce_mismatch(self):
-        packet = _res_pq(os.urandom(16), os.urandom(16), b"12345678", [1])
+        packet = res_pq_packet(os.urandom(16), os.urandom(16), b"12345678", [1])
         with pytest.raises(mtproto.MTProtoError, match="nonce"):
             mtproto.parse_res_pq(packet, os.urandom(16))
 

@@ -14,7 +14,7 @@ from __future__ import annotations
 import base64
 import binascii
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 FAKETLS_MARKER = 0xEE
 KEY_LEN = 16
@@ -28,13 +28,13 @@ class SecretError(ValueError):
 
 @dataclass(frozen=True)
 class Secret:
-    key: bytes
+    key: bytes = field(repr=False)  # never print the key, even in a traceback
     host: str
 
     def __post_init__(self) -> None:
         if len(self.key) != KEY_LEN:
             raise SecretError(f"key must be {KEY_LEN} bytes, got {len(self.key)}")
-        if not _HOSTNAME_RE.match(self.host):
+        if not _HOSTNAME_RE.fullmatch(self.host):
             raise SecretError(f"invalid fronting hostname: {self.host!r}")
 
     @classmethod
@@ -44,13 +44,13 @@ class Secret:
             raise SecretError("empty secret")
 
         raw = _decode(text)
-        if len(raw) < 1 + KEY_LEN + 1:
-            raise SecretError("secret is too short")
-        if raw[0] != FAKETLS_MARKER:
+        if not raw or raw[0] != FAKETLS_MARKER:
             raise SecretError(
                 "only FakeTLS secrets (starting with 'ee') are supported; "
                 "plain and 'dd' secrets are trivially detectable"
             )
+        if len(raw) < 1 + KEY_LEN + 1:
+            raise SecretError("secret is too short")
 
         try:
             host = raw[1 + KEY_LEN :].decode("ascii")
